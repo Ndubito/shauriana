@@ -1,0 +1,10 @@
+{
+  "version": "2026-11-03",
+  "currency": "USD",
+  "approved_payees": ["${SUPPLIER_SANDBOX_EMAIL}"],
+  "max_per_order": 150,
+  "max_per_week": 400,
+  "require_approval_above": 80,
+  "max_unit_price_increase_pct": 20,
+  "approval_timeout_hours": 24
+}
