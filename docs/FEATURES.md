@@ -5,7 +5,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 | # | Feature | Branch | Status |
 |---|---------|--------|--------|
 | 1 | [Payment path (go/no-go)](#1-payment-path-gono-go) | `feature/payment-path` | ✅ Done, merged Nov 4, 2026 |
-| 2 | [Scenario A end to end (fixed deal + policy engine)](#2-scenario-a-end-to-end-fixed-deal--policy-engine) | `feature/scenario-a` | ✅ Done, tested Nov 7, 2026 |
+| 2 | [Scenario A end to end (fixed deal + policy engine)](#2-scenario-a-end-to-end-fixed-deal--policy-engine) | `feature/scenario-a` | ✅ Done, merged Nov 7, 2026 |
 
 ---
 
