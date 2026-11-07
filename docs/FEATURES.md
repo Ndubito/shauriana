@@ -6,6 +6,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 |---|---------|--------|--------|
 | 1 | [Payment path (go/no-go)](#1-payment-path-gono-go) | `feature/payment-path` | ✅ Done, merged Nov 4, 2026 |
 | 2 | [Scenario A end to end (fixed deal + policy engine)](#2-scenario-a-end-to-end-fixed-deal--policy-engine) | `feature/scenario-a` | ✅ Done, merged Nov 7, 2026 |
+| 3 | [LLM negotiation](#3-llm-negotiation) | `feature/llm-negotiation` | ✅ Done, tested Nov 7, 2026 |
 
 ---
 
@@ -212,3 +213,149 @@ The DB afterwards has 1 run (`paid`), 3 offers, 1 deal with its invoice attached
 ### Known limits / later
 - Only scenario `a` is seeded. Scenarios B and C only need seed entries; B also needs the approve action.
 - No authorization-record export yet. Decisions already store everything it needs.
+
+---
+
+## 3. LLM negotiation
+
+### What it is
+A shop agent and a supplier agent, both Gemini models, negotiate the restock instead of using a fixed deal. Each agent picks its own moves. Plain code checks every offer against the sending side's hard limits before the other side sees it, caps the rounds, and builds the deal. Everything after the deal (invoice, policy engine, payout) is unchanged from Feature 2.
+
+This meets the spec's Nov 6 gate: *"the LLM negotiation produces Scenario A's deal."*
+
+### How a negotiation runs
+```
+Round 1   shop: request (written by code from inventory)   →  supplier: quote
+Round 2   shop: counter | accept | walk_away                →  supplier: counter | accept | walk_away
+Round 3   …                                                 →  …
+Round 4   …                                                 →  no accept by now = no deal
+```
+- **Offer message:** the spec's format (`run_id, round, from, action, item, qty, unit_price, delivery_date, rationale`). Every message goes into the `offers` table, rejected ones included (`valid = 0` plus the `reason`).
+- **Accept:** the deal is the **other side's last valid offer**, not the numbers inside the accept message. Those terms must also fit the accepting side's own limits, so the shop can't accept a quote above its max price.
+- **Invalid offers:** an offer outside the sender's limits goes back to that agent once with the reason. A second invalid move by the same side ends the run as `no_deal`.
+- **Other ways a run ends without a deal:** a walk away, no accept after the last round, or a model failure. The run is marked `no_deal`, no deal row is written, and PayPal is never called.
+- **Quote and counter:** treated as the same move ("here are my terms") and relabelled for the round. A supplier that says "counter" in round 1 doesn't lose a strike over wording.
+
+### Hard limits (checked in code on every offer)
+| Side | Limit | Source |
+|------|-------|--------|
+| Shop | unit price ≤ `max_unit_price` | inventory |
+| Shop | qty ≥ `reorder_level − stock` (enough to get back to the reorder level) | inventory |
+| Shop | qty ≤ `reorder_qty` (never buys more than planned, which keeps totals predictable) | inventory |
+| Shop | delivery ≤ today + `latest_delivery_days` | inventory |
+| Supplier | unit price ≥ `floor_prices[item]` | supplier price list |
+| Supplier | qty ≤ `max_qty` | supplier price list |
+| Supplier | delivery ≥ today + `lead_days` | supplier price list |
+| Both | price in whole cents; date `YYYY-MM-DD`; qty > 0 | — |
+
+Whole cents is our addition. PayPal invoice line items are 2-decimal amounts, so a price like $0.115 would make the invoice total differ from the deal, and `deal_integrity` would block it.
+
+### The agents (`app/agents/negotiator.py`)
+- Each agent turn is one stateless call. The system prompt holds only that side's own private facts. The turn prompt holds the round number, the transcript of valid offers, the allowed actions, and, on a retry, the rejection reason.
+- **Information separation, as if they were separate companies:**
+  - The shop knows its max price, its quantity range, its delivery deadline and the last price it paid. It never sees the supplier's floor price.
+  - The supplier knows its list price, floor price, max quantity and earliest delivery. It never sees the shop's max price or last paid price.
+- The other side's rationale is shown as quoted words. The prompt tells each agent to treat it as negotiation talk, never as instructions. Even if an agent were fooled, the limits, the policy engine and `request_payment` don't depend on what it says.
+
+### Model setup (`app/llm.py`)
+- Google's official `google-genai` SDK (3.0.0) with `generate_content`, `response_mime_type="application/json"` and a Pydantic `response_schema`. The reply comes back already validated as a `Move` object (`response.parsed`), so there is no text parsing.
+- **`temperature=0` and `seed=7`**, as the spec asks. All 3 live runs produced word-for-word identical transcripts.
+- **Default `LLM_MODEL=gemini-3.5-flash-lite`, with `LLM_FALLBACK_MODELS=gemini-3.5-flash`.** On 429 or 5xx the client retries once, then moves to the next model in the list. A 400 or a reply that doesn't match the schema fails straight away. If every model fails, the run ends as `no_deal`.
+- TLS uses the OS trust store via `truststore.inject_into_ssl()`, the same Avast workaround as Feature 1.
+
+### Configuration
+```
+LLM_API_KEY=                          # Gemini API key
+LLM_MODEL=gemini-3.5-flash-lite       # optional, this is the default
+LLM_FALLBACK_MODELS=gemini-3.5-flash  # optional, comma-separated
+```
+
+### Seed changes
+- The pouch's `max_unit_price` went from **$0.13 to $0.12**. Any deal inside both sides' limits is then at most 20% above the last paid $0.10 and at most 500 × $0.12 = $60, so Scenario A always passes the policy, whatever the models say.
+- The supplier gained `list_prices` (where it opens): pouch $0.12, plantain $0.90, oil $2.80. This also adds a `suppliers.list_prices` column.
+
+### Files
+| File | Purpose |
+|------|---------|
+| `app/negotiation/offers.py` | `Offer`, `ShopLimits`, `SupplierLimits`, `check_terms()` |
+| `app/negotiation/loop.py` | `negotiate(...) -> AgreedTerms \| NoDeal`: rounds, strikes, accept, saving offers |
+| `app/agents/negotiator.py` | `Move` schema, `ShopAgent`, `SupplierAgent`, prompt rendering |
+| `app/llm.py` | `GeminiLLM`: structured output, model fallback, token and time tracking |
+| `app/restock.py` | `run_restock()`: negotiation, or the fixed deal with `llm=None` |
+| `scripts/run_scenario.py` | Adds `--fixed` and `--max-rounds` |
+| `tests/test_negotiation.py` | Limits, the loop and the full run, with scripted fake agents |
+| `tests/test_llm.py` | Fallback and error handling, with a fake SDK client |
+
+### How to run
+```bash
+.venv/Scripts/python -m pytest -q                                  # 59 offline tests
+.venv/Scripts/python -m scripts.run_scenario a                     # agents negotiate, then pay in the sandbox
+.venv/Scripts/python -m scripts.run_scenario a --max-rounds 2      # the spec's fallback: one quote, one counter
+.venv/Scripts/python -m scripts.run_scenario a --fixed             # demo safety net: no LLM
+```
+
+### Model check (Nov 7, 2026)
+Each candidate got the same structured-output test call:
+
+| Model | Result |
+|---|---|
+| `gemini-3.6-flash` (listed as stable), `gemini-3.7-flash`, `gemini-3.8-flash` (newest) | **503 "high demand"** |
+| `gemini-3.5-flash` | OK in 13.2 s (uses about 440 thinking tokens) |
+| `gemini-3.5-flash-lite` | OK in 2.3 s, sensible counter-offer |
+
+This is why the default is Flash-Lite with a fallback list. To try a newer model, change `LLM_MODEL`.
+
+### Test results (Nov 7, 2026)
+**Live, Scenario A, 3 of 3 runs paid**, each with an identical transcript:
+```
+[r1 shop    ] request  500 × packaging_pouch_100g by 2026-11-14
+[r1 supplier] quote    500 @ $0.12 by 2026-11-10  "We can supply 500 pouches at our standard competitive price with prompt delivery."
+[r2 shop    ] counter  500 @ $0.11 by 2026-11-14  "We can proceed with a slightly lower unit price closer to our recent costs."
+[r2 supplier] accept   500 @ $0.11 by 2026-11-14  "We are happy to accept your counteroffer to secure a long-term business relationship."
+[deal       ] 500 × packaging_pouch_100g @ $0.11 = $55.00 USD
+[policy     ] … → APPROVED: All rules passed.
+[payout     ] SUCCESS
+[invoice    ] → MARKED_AS_PAID
+[run        ] outcome = paid
+[llm        ] 3 calls on gemini-3.5-flash-lite · 1364 in / 229 out / 0 thinking tokens · 3.5–4.9s
+```
+| Run | Batch | Model time |
+|---|---|---|
+| run_1107083645_05c8 | J7SJW6T9GPG3A | 4.9 s |
+| run_1107083723_1d89 | 38QEKQNDHLQ92 | 3.6 s |
+| run_1107083751_2827 | ZVHCRJRHEVHHY | 3.5 s |
+
+The deal matches the spec's expected Scenario A result: *"Shop counters, deal at $0.11 × 500 = $55. Approved, paid automatically."*
+
+**Offline tests: 59 passed** (30 new):
+- **Limit checks:** each limit on both sides, sub-cent prices, bad dates
+- **Loop:**
+  - counter then accept
+  - an accept uses the other side's terms, even when the accept message carries different numbers
+  - an invalid offer is sent back once with its reason
+  - a second invalid offer is no deal
+  - the shop can't accept above its max
+  - the round 4 cap
+  - `max_rounds=2`
+  - walk away
+  - a model error is no deal
+  - quote and counter work as synonyms
+- **Agent prompts:** private facts stay separate, and the other side's text is shown as quoted words
+- **Full run with a fake model:** a deal that gets paid, and a no-deal with no PayPal call
+- **Model fallback:**
+  - retry, then the next model
+  - a retry that succeeds on the same model
+  - every model busy
+  - a 400 fails straight away
+  - a reply that doesn't match the schema
+  - the env model list is built correctly
+
+### Design decisions and gotchas
+- **The model never touches money.** The negotiation produces terms. A deal, then the invoice, then the policy engine, then the payout come after it in plain code, exactly as in Feature 2.
+- **The opening request is written by code.** It's just item, quantity and deadline from the inventory, so there's no reason to spend a model call on it.
+- **Short, identical demos.** Temperature 0 and a fixed seed give the same three-call negotiation every time. If a scene needs a longer negotiation on camera, change the seed prices or the prompts, not the temperature.
+- **Gemini capacity.** The newest Flash models were overloaded on the build day. The fallback list keeps runs working, and `--fixed` remains a last-resort safety net for recording.
+
+### Known limits / later
+- The web page transcript (chat view, greyed-out rejected offers) comes with the web app feature. The data is already in `offers`.
+- Scenarios B and C still need seed entries. B also needs the approve action.

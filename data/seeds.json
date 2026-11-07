@@ -6,7 +6,7 @@
       "stock": 250,
       "reorder_level": 100,
       "reorder_qty": 500,
-      "max_unit_price": "0.13",
+      "max_unit_price": "0.12",
       "latest_delivery_days": 7,
       "last_paid_unit_price": "0.10"
     },
@@ -36,7 +36,16 @@
       "id": "sup_1",
       "name": "Nairobi Packaging & Produce",
       "paypal_email": "${SUPPLIER_SANDBOX_EMAIL}",
-      "floor_prices": {"packaging_pouch_100g": "0.10", "plantain_kg": "0.75", "cooking_oil_l": "1.90"},
+      "list_prices": {
+        "packaging_pouch_100g": "0.12",
+        "plantain_kg": "0.90",
+        "cooking_oil_l": "2.80"
+      },
+      "floor_prices": {
+        "packaging_pouch_100g": "0.10",
+        "plantain_kg": "0.75",
+        "cooking_oil_l": "1.90"
+      },
       "max_qty": 1000,
       "lead_days": 3
     }
@@ -46,8 +55,13 @@
       "title": "Routine restock",
       "item": "packaging_pouch_100g",
       "supplier_id": "sup_1",
-      "set_stock": {"packaging_pouch_100g": 40},
-      "fixed_deal": {"qty": 500, "unit_price": "0.11"}
+      "set_stock": {
+        "packaging_pouch_100g": 40
+      },
+      "fixed_deal": {
+        "qty": 500,
+        "unit_price": "0.11"
+      }
     }
   }
 }

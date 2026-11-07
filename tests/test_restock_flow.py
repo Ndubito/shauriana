@@ -7,7 +7,7 @@ from app import db, seed
 from app.models import Invoice
 from app.paypal.gateway import PayoutResult
 from app.policy.rules import from_dict
-from app.restock import run_fixed_deal
+from app.restock import run_restock
 from app.shop.tools import request_payment
 
 SUPPLIER = "supplier@business.example.com"
@@ -60,7 +60,7 @@ def outcome(conn, deal_id):
 def test_scenario_a_pays_and_records(conn, seed_data):
     scenario = seed.apply_scenario(conn, seed_data, "a")
     gw = FakeGateway()
-    res = run_fixed_deal(conn, scenario, rules=RULES, gateway=gw, shop_email=SHOP)
+    res = run_restock(conn, scenario, rules=RULES, gateway=gw, shop_email=SHOP).payment_request
 
     assert res.decision.status == "approved"
     assert res.payment.ok
@@ -77,7 +77,7 @@ def test_scenario_a_pays_and_records(conn, seed_data):
 def test_second_request_payment_on_same_deal_is_blocked_without_paypal_call(conn, seed_data):
     scenario = seed.apply_scenario(conn, seed_data, "a")
     gw = FakeGateway()
-    first = run_fixed_deal(conn, scenario, rules=RULES, gateway=gw, shop_email=SHOP)
+    first = run_restock(conn, scenario, rules=RULES, gateway=gw, shop_email=SHOP).payment_request
     second = request_payment(conn, first.decision.deal_id, rules=RULES, gateway=gw)
 
     assert (second.decision.status, second.decision.rule) == ("blocked", "duplicate")
@@ -91,7 +91,7 @@ def test_second_request_payment_on_same_deal_is_blocked_without_paypal_call(conn
 def test_payee_swap_on_invoice_is_blocked_and_no_money_moves(conn, seed_data):
     scenario = seed.apply_scenario(conn, seed_data, "a")
     gw = FakeGateway(invoice_payee="fraud@example.com")
-    res = run_fixed_deal(conn, scenario, rules=RULES, gateway=gw, shop_email=SHOP)
+    res = run_restock(conn, scenario, rules=RULES, gateway=gw, shop_email=SHOP).payment_request
     assert (res.decision.status, res.decision.rule) == ("blocked", "payee_allowlist")
     assert gw.payouts == []
     assert outcome(conn, res.decision.deal_id) == "blocked"
@@ -99,8 +99,8 @@ def test_payee_swap_on_invoice_is_blocked_and_no_money_moves(conn, seed_data):
 
 def test_failed_payout_marks_run_failed(conn, seed_data):
     scenario = seed.apply_scenario(conn, seed_data, "a")
-    res = run_fixed_deal(conn, scenario, rules=RULES, gateway=FakeGateway(payout_status="UNCLAIMED"),
-                         shop_email=SHOP)
+    res = run_restock(conn, scenario, rules=RULES, gateway=FakeGateway(payout_status="UNCLAIMED"),
+                      shop_email=SHOP).payment_request
     assert res.payment.status == "UNCLAIMED" and not res.payment.ok
     assert outcome(conn, res.decision.deal_id) == "failed"
     # last paid price is untouched when money didn't arrive
@@ -112,5 +112,5 @@ def test_no_run_when_stock_is_above_reorder_level(conn, seed_data):
     from app.restock import RestockError
     seed.reset(conn, seed_data)  # pouch stock 250, reorder at 100
     with pytest.raises(RestockError):
-        run_fixed_deal(conn, seed_data["scenarios"]["a"] | {"set_stock": {}}, rules=RULES,
+        run_restock(conn, seed_data["scenarios"]["a"] | {"set_stock": {}}, rules=RULES,
                        gateway=FakeGateway(), shop_email=SHOP)

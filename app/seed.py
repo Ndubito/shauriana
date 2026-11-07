@@ -29,9 +29,10 @@ def reset(conn: sqlite3.Connection, seed: dict) -> None:
             )
         for row in seed["suppliers"]:
             conn.execute(
-                "INSERT INTO suppliers VALUES (?, ?, ?, ?, ?, ?)",
-                (row["id"], row["name"], row["paypal_email"], json.dumps(row["floor_prices"]),
-                 row["max_qty"], row["lead_days"]),
+                "INSERT INTO suppliers (id, name, paypal_email, list_prices, floor_prices, max_qty, lead_days)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (row["id"], row["name"], row["paypal_email"], json.dumps(row["list_prices"]),
+                 json.dumps(row["floor_prices"]), row["max_qty"], row["lead_days"]),
             )
         conn.execute("COMMIT")
     except Exception:
