@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
     id           TEXT PRIMARY KEY,
     name         TEXT NOT NULL,
     paypal_email TEXT NOT NULL,
-    floor_prices TEXT NOT NULL,      -- JSON {item: price}
+    list_prices  TEXT NOT NULL,      -- JSON {item: price}; where the supplier opens
+    floor_prices TEXT NOT NULL,      -- JSON {item: price}; the lowest it will go
     max_qty      INTEGER NOT NULL,
     lead_days    INTEGER NOT NULL
 );
