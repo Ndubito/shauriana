@@ -17,7 +17,7 @@
       "reorder_level": 80,
       "reorder_qty": 120,
       "max_unit_price": "0.95",
-      "latest_delivery_days": 3,
+      "latest_delivery_days": 5,
       "last_paid_unit_price": "0.80"
     },
     {
@@ -55,12 +55,54 @@
       "title": "Routine restock",
       "item": "packaging_pouch_100g",
       "supplier_id": "sup_1",
-      "set_stock": {
-        "packaging_pouch_100g": 40
+      "expect": "approved",
+      "inventory": {
+        "packaging_pouch_100g": {
+          "stock": 40
+        }
       },
       "fixed_deal": {
         "qty": 500,
         "unit_price": "0.11"
+      }
+    },
+    "b": {
+      "title": "Large order",
+      "item": "plantain_kg",
+      "supplier_id": "sup_1",
+      "expect": "needs_approval",
+      "inventory": {
+        "plantain_kg": {
+          "stock": 30,
+          "reorder_level": 150,
+          "reorder_qty": 120
+        }
+      },
+      "fixed_deal": {
+        "qty": 120,
+        "unit_price": "0.85"
+      }
+    },
+    "c": {
+      "title": "Price spike",
+      "item": "cooking_oil_l",
+      "supplier_id": "sup_1",
+      "expect": "blocked",
+      "inventory": {
+        "cooking_oil_l": {
+          "stock": 10
+        }
+      },
+      "suppliers": {
+        "sup_1": {
+          "floor_prices": {
+            "cooking_oil_l": "2.70"
+          }
+        }
+      },
+      "fixed_deal": {
+        "qty": 20,
+        "unit_price": "2.70"
       }
     }
   }

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Restocking Agents</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@36.2.0/dist/ag-grid-community.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-name">Restocking agents</div>
+      <div class="brand-sub">with spending guardrails</div>
+    </div>
+    <nav class="nav">
+      <a href="#activity" data-view="activity" class="nav-link">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+        Activity <span id="nav-badge" class="nav-badge hidden">0</span>
+      </a>
+      <a href="#inventory" data-view="inventory" class="nav-link">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zM12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>
+        Inventory
+      </a>
+      <a href="#policy" data-view="policy" class="nav-link">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+        Policy
+      </a>
+    </nav>
+    <div class="demo">
+      <div class="demo-title">Demo scenarios</div>
+      {% for s in scenarios %}
+      <button class="demo-btn scenario" data-scenario="{{ s.key }}"><b>{{ s.key|upper }}</b> {{ s.title }}</button>
+      {% endfor %}
+      <button class="demo-btn ghost" id="reset">Reset demo</button>
+      <div class="demo-foot">{{ llm_label }}</div>
+    </div>
+  </aside>
+
+  <main class="content">
+    <!-- ACTIVITY -->
+    <section id="view-activity" class="view">
+      <header class="view-head">
+        <h1>Activity</h1>
+        <p class="lede">Your agents restock in the background. Open the details only when you want them.</p>
+      </header>
+
+      <article id="tracker" class="tracker">
+        <div id="tracker-empty" class="tracker-empty">
+          <div class="empty-title">All stocked up</div>
+          <p>When an item drops below its reorder level, the agents start a restock and it shows up here.</p>
+        </div>
+        <div id="tracker-body" class="hidden">
+          <div class="tracker-top">
+            <div>
+              <div id="t-sub" class="t-sub"></div>
+              <div class="t-headline"><span id="t-pulse" class="pulse hidden" aria-hidden="true"></span><span id="t-headline"></span></div>
+              <div id="t-detail" class="t-detail"></div>
+            </div>
+            <div id="t-amount" class="t-amount"></div>
+          </div>
+          <ol id="t-steps" class="steps" aria-label="Restock progress"></ol>
+          <div id="t-action" class="t-action hidden"></div>
+          <details id="d-chat" class="drawer">
+            <summary id="d-chat-sum">Show negotiation</summary>
+            <div id="chat" class="chat"></div>
+          </details>
+          <details id="d-checks" class="drawer">
+            <summary id="d-checks-sum">Show policy checks</summary>
+            <div id="checks" class="checks"></div>
+          </details>
+        </div>
+      </article>
+
+      <div id="other-approvals" class="other-approvals hidden"></div>
+
+      <section class="history">
+        <h2>Earlier</h2>
+        <ul id="history" class="history-list"><li class="muted">No earlier restocks.</li></ul>
+      </section>
+
+      <details id="d-audit" class="audit">
+        <summary><span>Audit log</span> <span id="audit-count" class="muted"></span></summary>
+        <div class="audit-tools"><input id="quick" type="search" placeholder="Search the log" aria-label="Search the audit log"></div>
+        <div id="audit-grid" class="grid"></div>
+      </details>
+    </section>
+
+    <!-- INVENTORY -->
+    <section id="view-inventory" class="view hidden">
+      <header class="view-head">
+        <h1>Inventory</h1>
+        <p class="lede">Set a stock level below the reorder point and the agents start a restock on their own.</p>
+      </header>
+      <div class="panel">
+        <table class="inv">
+          <thead><tr><th>Item</th><th class="num">In stock</th><th class="num">Reorder at</th><th class="num">Usual order</th><th class="num">Max price</th><th class="num">Last paid</th></tr></thead>
+          <tbody id="inventory"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- POLICY -->
+    <section id="view-policy" class="view hidden">
+      <header class="view-head">
+        <h1>Policy</h1>
+        <p class="lede">The rules every payment passes before money moves. They're checked in code, in this order, and no agent or supplier message can change them.</p>
+      </header>
+      <div class="rules">
+        <div class="rule"><div class="rule-n">1</div><div><div class="rule-t">Approved payees only</div>
+          <div class="rule-d">Money only goes to {% for p in policy.approved_payees %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</div></div><div class="rule-o bad">blocks</div></div>
+        <div class="rule"><div class="rule-n">2</div><div><div class="rule-t">Invoice matches the deal</div>
+          <div class="rule-d">The invoice total and payee must be exactly what the agents agreed.</div></div><div class="rule-o bad">blocks</div></div>
+        <div class="rule"><div class="rule-n">3</div><div><div class="rule-t">No double payments</div>
+          <div class="rule-d">A deal can only be paid once.</div></div><div class="rule-o bad">blocks</div></div>
+        <div class="rule"><div class="rule-n">4</div><div><div class="rule-t">No price spikes</div>
+          <div class="rule-d">Unit price at most {{ policy.max_unit_price_increase_pct|int }}% above the last price paid.</div></div><div class="rule-o bad">blocks</div></div>
+        <div class="rule"><div class="rule-n">5</div><div><div class="rule-t">Per-order cap</div>
+          <div class="rule-d">No single order above ${{ '%.2f'|format(policy.max_per_order) }}.</div></div><div class="rule-o bad">blocks</div></div>
+        <div class="rule"><div class="rule-n">6</div><div><div class="rule-t">Weekly cap</div>
+          <div class="rule-d">At most ${{ '%.2f'|format(policy.max_per_week) }} across the last 7 days, counting payments waiting for approval.</div></div><div class="rule-o bad">blocks</div></div>
+        <div class="rule"><div class="rule-n">7</div><div><div class="rule-t">Your approval for larger orders</div>
+          <div class="rule-d">Orders above ${{ '%.2f'|format(policy.require_approval_above) }} wait for you. No answer in {{ policy.approval_timeout_hours }} hours counts as no.</div></div><div class="rule-o warn">asks you</div></div>
+      </div>
+      <p class="muted small">Rules version {{ policy.version }} · read-only on this page.</p>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast hidden" role="status"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

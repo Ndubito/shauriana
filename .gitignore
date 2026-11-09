@@ -10,5 +10,5 @@ __pycache__/
 # Local data
 *.db
 
-# Local Claude Code settings
-.claude/settings.local.json
+# Local Claude Code settings (launch config, permissions)
+.claude/

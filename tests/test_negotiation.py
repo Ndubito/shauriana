@@ -197,3 +197,32 @@ def test_full_run_no_deal_sets_outcome(monkeypatch, conn):
     assert res.no_deal_reason and res.payment_request is None
     assert conn.execute("SELECT outcome FROM runs").fetchone()[0] == "no_deal"
     assert gw.payouts == [] and conn.execute("SELECT COUNT(*) FROM deals").fetchone()[0] == 0
+
+
+# ---- order quantities (regression: oil at 0 asked for 20 when the minimum was 25) ----
+
+@pytest.mark.parametrize("stock,reorder_level,reorder_qty,expected", [
+    (0, 25, 20, (25, 25)),     # usual order too small to reach the reorder level -> order the minimum
+    (10, 25, 20, (15, 20)),    # scenario C: usual order covers it
+    (40, 100, 500, (60, 500)),  # scenario A
+    (30, 150, 120, (120, 120)),  # scenario B
+])
+def test_order_quantities(stock, reorder_level, reorder_qty, expected):
+    from app.restock import order_quantities
+    assert order_quantities({"stock": stock, "reorder_level": reorder_level, "reorder_qty": reorder_qty}) == expected
+
+
+def test_oil_at_zero_requests_25_and_can_close(monkeypatch, conn):
+    monkeypatch.setenv("SUPPLIER_SANDBOX_EMAIL", SUPPLIER)
+    data = seed.load_seed_file()
+    seed.reset(conn, data)
+    conn.execute("UPDATE inventory SET stock = 0 WHERE item = 'cooking_oil_l'")
+    ok = (utcnow().date() + timedelta(days=4)).isoformat()
+    llm = FakeLLM([mv("accept")], [mv("quote", qty=25, price=1.95, when=ok)])
+    gw = FakeGateway()
+    res = run_restock(conn, {"item": "cooking_oil_l", "supplier_id": "sup_1"}, rules=RULES, gateway=gw,
+                      shop_email=SHOP, llm=llm)
+    request = conn.execute("SELECT qty FROM offers WHERE action = 'request'").fetchone()[0]
+    assert request == 25
+    assert res.payment_request.decision.status == "approved"
+    assert gw.payouts[0][2] == Decimal("48.75")  # 25 × $1.95

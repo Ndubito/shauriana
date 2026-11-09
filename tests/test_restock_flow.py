@@ -112,5 +112,5 @@ def test_no_run_when_stock_is_above_reorder_level(conn, seed_data):
     from app.restock import RestockError
     seed.reset(conn, seed_data)  # pouch stock 250, reorder at 100
     with pytest.raises(RestockError):
-        run_restock(conn, seed_data["scenarios"]["a"] | {"set_stock": {}}, rules=RULES,
+        run_restock(conn, seed_data["scenarios"]["a"], rules=RULES,
                        gateway=FakeGateway(), shop_email=SHOP)

@@ -7,6 +7,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 | 1 | [Payment path (go/no-go)](#1-payment-path-gono-go) | `feature/payment-path` | ✅ Done, merged Nov 4, 2026 |
 | 2 | [Scenario A end to end (fixed deal + policy engine)](#2-scenario-a-end-to-end-fixed-deal--policy-engine) | `feature/scenario-a` | ✅ Done, merged Nov 7, 2026 |
 | 3 | [LLM negotiation](#3-llm-negotiation) | `feature/llm-negotiation` | ✅ Done, merged Nov 7, 2026 |
+| 4 | [Web page, approvals and Scenarios B and C](#4-web-page-approvals-and-scenarios-b-and-c) | `feature/web-app` | ✅ Done, tested Nov 9, 2026 |
 
 ---
 
@@ -359,3 +360,183 @@ The deal matches the spec's expected Scenario A result: *"Shop counters, deal at
 ### Known limits / later
 - The web page transcript (chat view, greyed-out rejected offers) comes with the web app feature. The data is already in `offers`.
 - Scenarios B and C still need seed entries. B also needs the approve action.
+
+---
+
+## 4. Web page, approvals and Scenarios B and C
+
+### What it is
+A web app that shows the whole system, so the demo never has to leave it except to show the PayPal sandbox. A side navbar switches between three pages. The live run reads like a delivery tracker: one sentence and a progress bar. Details such as the agents' chat, the policy checks and the audit log stay folded away until you open them.
+
+The server is FastAPI with Jinja templates. One plain JavaScript file asks the server for updates every 2 seconds. AG Grid Community 36.2.0 loads from jsDelivr, and there's no build step.
+
+This feature also adds Scenarios B and C, and the owner's approve and deny actions.
+
+### Layout
+```
+Sidebar   Activity (badge = payments waiting for you) · Inventory · Policy
+          Demo scenarios at the bottom: A Routine restock · B Large order · C Price spike · Reset demo
+
+Activity  Tracker card for the latest run:
+            "Cooking oil · 25 litre · started 10:26"
+            ● Agents are negotiating with Nairobi Packaging & Produce          $58.75
+            [Low stock]━[Negotiated]━[Rules checked]━([Your approval])━[Paid]
+            (Decline / Approve sit inside the tracker when your approval is needed)
+            ▸ Show negotiation · 4 rounds        → the agents' chat, rejected offers struck through
+            ▸ Show policy checks · 7 of 7 passed → each rule ✓ / ✕ / not reached + authorization link
+          "Also waiting for you": pending approvals from earlier runs, if any
+          Earlier: one line per past run (time, item, qty, total, Paid / Blocked / Declined / No deal)
+          Audit log · N events  [Show ▾] → AG Grid with sorting, filters, badges, quick search
+
+Inventory Own page: item, in stock (editable), reorder at, usual order, max price, last paid.
+          Setting stock below the reorder level starts a restock and switches to Activity.
+
+Policy    Own page: the 7 rules in plain words, in evaluation order, each tagged "blocks" or "asks you".
+```
+
+**Tracker headlines** (one sentence per stage): "Agents are negotiating with …", "Deal agreed", "Checking your spending rules", "Waiting for your approval", "Paying …", "Paid $X to … · Approved by your rules / by you", "Blocked: no money moved" (with the reason in red), "You declined this payment", "Approval expired: no payment", "No deal this time", "Payment didn't go through".
+
+**Progress steps:** the "Your approval" step only appears when a payment is actually held, so routine runs stay a 4-step journey. A failed step turns red and is renamed "Blocked", "No deal", "Denied" or "Expired". The active step pulses, and the pulse switches off for users who prefer reduced motion.
+
+**Calm by default:**
+- The negotiation and checks drawers start closed and close again when a new run starts.
+- While a run is updating, they stay however you left them.
+- Each block redraws only when its data changed, so open drawers, scroll positions and clicks are never disturbed.
+- The audit grid is only created the first time the log is opened.
+
+Under 820 px wide, the sidebar becomes a top bar.
+
+### Endpoints
+| Method | Path | Does |
+|---|---|---|
+| GET | `/` | The page |
+| GET | `/health` | `{"ok": true}`, for the host's health check |
+| GET | `/inventory` | Stock, reorder levels, last paid price, `low` flag |
+| PATCH | `/inventory/{item}` | `{"stock": n}`. Below the reorder level, it starts a negotiated restock (needs the LLM) |
+| GET | `/runs/latest` | The latest run's full state (incl. supplier name, unit), plus the runner state (busy, job, last error, log) |
+| GET | `/runs?limit=10` | One-line summaries of recent runs, newest first (for "Earlier") |
+| GET | `/runs/{id}` | One run: offers, deal, decision, approval, payment, `stage` |
+| GET | `/runs/{id}/authorization` | Authorization record JSON |
+| GET | `/approvals?status=pending` | The queue. Expired approvals are moved to `expired` first |
+| POST | `/approvals/{id}` | `{"approve": true\|false}`. Returns 202, 404 if unknown, 409 if already answered, expired or busy |
+| GET | `/audit` | Offers, decisions, approvals and payments as one list, newest first |
+| GET | `/policy` | The rules file, read-only |
+| POST | `/scenarios/{a,b,c}` | Reset, apply the scenario's overrides, start the run. 202, or 409 if a job is running |
+| POST | `/reset` | Wipe runs and restore the seed |
+
+Start the server with:
+```bash
+.venv/Scripts/python -m uvicorn app.web.main:create_app_from_env --factory --port 8000
+```
+If `LLM_API_KEY` isn't set, the scenario buttons run their fixed deals and manual restocks are refused with an explanation.
+
+### How it works
+- **Background jobs, one at a time (`app/runner.py`).** Each button starts a job on a background thread and returns 202 immediately. Each job opens its own SQLite connection. Offers and status changes are saved as they happen, so the page shows the chat building up. A second job while one is running gets 409 "already running".
+- **The lock comes first.** Every database change a button makes (scenario reset, the approve or deny answer, the payment reservation) happens inside the job, while the job holds the lock. This was a fix during the build: the first version recorded an approval before taking the lock, so another job could have left a reserved payment unpaid.
+- **Approve and deny (`approvals.decide`).** Inside `BEGIN IMMEDIATE`:
+  - it re-checks that the approval is still `pending` and not expired
+  - approve also reserves the payment row in the same transaction, then `pay()` runs
+  - deny marks the run `denied`
+
+  A second Approve gets 409, and nothing is paid twice.
+- **SQLite runs in WAL mode**, so the page can read while a job writes.
+- **The authorization record (`app/authorization.py`)** is built from the `deals`, `decisions`, `approvals` and `payments` tables in the spec's format:
+  - `authorized_by` is `{"type": "policy"}` when the policy approved, `{"type": "owner"}` when the owner approved, and `null` for blocked, denied or expired runs
+  - those runs still get a record, with `paypal: null`
+- **Untrusted text is never inserted as HTML.** Model and supplier text (rationales, reasons) goes in with `textContent`.
+- **No flicker, no lost clicks.** The transcript, approval queue, inventory and audit grid only redraw when their data has changed. Found during testing: redrawing every 2 s replaced the Approve button and the stock inputs between "mouse down" and "click".
+
+### Scenarios (`data/seeds.json`)
+Each scenario resets the database, then applies `inventory` overrides and `suppliers` price overrides. The numbers are chosen so the outcome can't vary, whatever the models agree.
+
+| Scenario | Setup | Why the outcome is fixed | Expected |
+|---|---|---|---|
+| A Routine restock | pouch stock 40 (reorder 100) | any deal ≤ 500 × $0.12 = $60, ≤ 20% above $0.10 | approved, paid |
+| B Large order | plantain stock 30, reorder 150, reorder qty 120 | qty must be exactly 120, price $0.75–$0.95 → $90–$114: over $80, under $150 | held, then owner approves or denies |
+| C Price spike | oil stock 10, supplier floor raised to $2.70 (last paid $2.00) | every price the supplier can offer is ≥ 35% above last paid; 20 L ≤ $60, so no other rule fires first | blocked by `price_spike` |
+
+Plantain's `latest_delivery_days` went from 3 to 5. Before that, the supplier's 3-day lead time left only one possible delivery date.
+
+### Agent prompt changes (found while testing C)
+The first live run of C ended `no_deal`. The shop knew it last paid $2.00, held out at $2.50, and the 4 rounds ran out. Sensible behaviour, but it never reached the policy, so the scenario failed. Two changes:
+- **The shop now sees its stock situation:** "Stock on hand: 10 litre (reorder level 25); running out stops production, which costs more than a higher price."
+- **A last-round rule for both agents:** if the other side's latest offer is within your limits on the last round, accept it.
+
+After this change, C plays out as the spec describes: the shop accepts 20 × $2.70 = $54 to "secure our essential restock before production halts", and the policy blocks it. That's the core story: **the agent's own limits allowed the price, and the owner's rule caught the 35% jump.**
+
+### Order quantity fix (found by the owner while testing)
+Setting cooking oil to 0 made the shop ask for 20 L, even though it needed at least 25 L to get back to its reorder level. The shop's limits were min = `reorder_level − stock` = 25 and max = `reorder_qty` = 20, and the opening request used `reorder_qty`. No quantity could satisfy both, so the run could never end in a valid deal.
+
+The fix is `restock.order_quantities()`:
+- **min** = `reorder_level − stock`
+- **target** = `max(reorder_qty, min)`
+
+The opening request and the shop's maximum both use the target, so oil at 0 now asks for 25 L. Scenarios A, B and C keep the same numbers: 500, 120, 20. Tests cover all four cases, plus a full run from oil at 0 to approved and paid. Verified live: oil at 0 → request 25 L → 4 rounds → $2.35/L → paid $58.75.
+
+### Model logging
+`app/llm.py` now logs which model answered each call, with time and tokens, plus every 429/5xx and fallback. Reason: on Nov 9 calls sometimes took 12–14 s where they'd taken ~1 s on Nov 7. The logs showed `gemini-3.5-flash-lite` itself answering slowly at times (no fallback involved), so the slowness was on Google's side. Typical calls are ~1 s.
+
+### Files
+| File | Purpose |
+|------|---------|
+| `app/web/main.py` | `create_app(runner)` with every endpoint; `create_app_from_env()` wires production |
+| `app/web/templates/index.html` | Sidebar plus three views (Activity, Inventory, Policy), switched by URL hash |
+| `app/web/static/app.js` | Polling, view switching, tracker (headline, steps, approve), drawers, history, lazy AG Grid |
+| `app/web/static/style.css` | Colour variables (green, amber, red), tracker steps, sidebar; top bar under 820 px |
+| `app/runner.py` | Background jobs with a lock: scenarios, manual restock, approve/deny then pay, reset |
+| `app/views.py` | Data for the page: inventory, run detail with stage, recent runs, approvals, audit list |
+| `app/restock.py` | Adds `order_quantities()` (the quantity fix) |
+| `app/approvals.py` | Adds `decide()` (approve or deny, atomically) |
+| `app/authorization.py` | Authorization record builder |
+| `app/seed.py` | General scenario overrides (inventory fields, supplier prices) |
+| `tests/test_web.py` | 13 API tests with the test client, a fake gateway and inline jobs |
+
+### Test results (Nov 9, 2026)
+**Offline: 72 tests pass** (13 new):
+- the page renders
+- inventory and policy
+- A auto-paid, with its full authorization record
+- B held → approve → paid, and a second approve gets 409 with no second payout
+- B deny → no payment
+- C blocked with the spec's exact reason
+- an expired approval can't be approved
+- the audit log has all four event types, newest first
+- reset
+- stock changes
+- busy refuses a second job
+- unknown items give 404
+
+**Live, in the browser pane, against the real PayPal sandbox and Gemini:**
+| Check | Result |
+|---|---|
+| A | Quote $0.12 → counter $0.11 → accept · ✅ approved by policy · payout SUCCESS · last paid updated to $0.11 |
+| B | 120 kg negotiated to $0.88 = $105.60 · ⏸️ held · Approve → ✅ "Approved by owner" · payout SUCCESS · `authorized_by: owner` |
+| C | $2.80 quote, shop counters $2.30 / $2.45, supplier holds $2.70, shop accepts in round 4 · ⛔ "Unit price $2.70 is 35% above last paid $2.00 (limit 20%)" · no payment |
+| Manual restock | Set plantain stock to 50 → "restock started" → negotiated $105.60 → held |
+| Deny | ⛔ "Denied by owner: no money moves" · no payment · authorization record has `authorized_by: null`, `paypal: null` |
+| Audit log | All events, newest first, status badges; quick search "owner" → 3 of 9 rows |
+| Authorization record | A: `authorized_by: policy`, 7 passing checks, rules in force, invoice, batch, item and invoice payment IDs |
+| Reset | Seed restored, run, queue and audit cleared |
+| Console | No JavaScript errors |
+
+**Redesign, re-tested live (Nov 9):**
+| Check | Result |
+|---|---|
+| Oil at 0 (the bug) | Inventory page → set 0 → switches to Activity: "Cooking oil · **25 litre**" → paid $58.75 |
+| Tracker | One headline per stage, pulsing while live, steps turn green, chat folded away |
+| B approval in the tracker | Amber "Your approval" step, Activity badge **1**, Approve inside the card → "Paid $105.60 · Approved by you" |
+| C | Red "Blocked" step, "Blocked: no money moved", the reason in red, drawers closed |
+| Policy checks drawer | ✓ / ✕ per rule in plain words, later rules "not reached", authorization link |
+| Drawers | Stay open while the same run updates; close when a new run starts (checked by feeding a new run ID) |
+| Earlier list | After a manual pouch restock, run C shows as "Cooking oil · 20 litre · $54.00 · Blocked" with its reason |
+| Audit log | Collapsed bar "8 events · Show"; grid created on first open, all rows present |
+| Policy page | Its own view, 7 rules in plain words with "blocks" / "asks you" |
+| Console | No JavaScript errors |
+
+**Offline: 78 tests pass** (6 new: four quantity cases, the oil-at-0 run, and the recent-runs list with run fields).
+
+### Known limits / later
+- Hosting on Render is the next feature. `/health` is ready for it.
+- The sandbox payout takes about 20 s, so the stage shows "paying" for a while. Fine for the video, but worth knowing.
+- Scenario D (payee swap) remains optional. The rule is already covered by tests.
+- No login (out of scope in the spec). On a public URL, anyone can press the buttons. It's sandbox money only.
