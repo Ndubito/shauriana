@@ -366,28 +366,45 @@ The deal matches the spec's expected Scenario A result: *"Shop counters, deal at
 ## 4. Web page, approvals and Scenarios B and C
 
 ### What it is
-One page shows the whole system, so the demo never has to leave it except to show the PayPal sandbox. The page shows:
-- the inventory, with editable stock
-- the agents' negotiation as a live chat
-- the policy decision banner
-- the owner's approval queue, with Approve and Deny buttons
-- the read-only rules
-- an AG Grid audit log of every event
+A web app that shows the whole system, so the demo never has to leave it except to show the PayPal sandbox. A side navbar switches between three pages. The live run reads like a delivery tracker: one sentence and a progress bar. Details such as the agents' chat, the policy checks and the audit log stay folded away until you open them.
 
 The server is FastAPI with Jinja templates. One plain JavaScript file asks the server for updates every 2 seconds. AG Grid Community 36.2.0 loads from jsDelivr, and there's no build step.
 
 This feature also adds Scenarios B and C, and the owner's approve and deny actions.
 
-### Page layout
+### Layout
 ```
-Header:  title · LLM in use · [A Routine restock] [B Large order] [C Price spike] [Reset]
-Left:    Inventory (editable stock, LOW rows highlighted) · Policy (read-only)
-Right:   Live run (chat: shop left, supplier right, rejected offers struck through with the reason)
-         Decision banner (green approved · amber needs approval · red blocked/denied) + authorization link
-         Approval queue (amount, supplier, why it was held, [Approve] [Deny])
-Bottom:  Audit log, full width: AG Grid with sorting, filters, coloured status badges, quick search,
-         and an authorization-record link on payment rows
+Sidebar   Activity (badge = payments waiting for you) · Inventory · Policy
+          Demo scenarios at the bottom: A Routine restock · B Large order · C Price spike · Reset demo
+
+Activity  Tracker card for the latest run:
+            "Cooking oil · 25 litre · started 10:26"
+            ● Agents are negotiating with Nairobi Packaging & Produce          $58.75
+            [Low stock]━[Negotiated]━[Rules checked]━([Your approval])━[Paid]
+            (Decline / Approve sit inside the tracker when your approval is needed)
+            ▸ Show negotiation · 4 rounds        → the agents' chat, rejected offers struck through
+            ▸ Show policy checks · 7 of 7 passed → each rule ✓ / ✕ / not reached + authorization link
+          "Also waiting for you": pending approvals from earlier runs, if any
+          Earlier: one line per past run (time, item, qty, total, Paid / Blocked / Declined / No deal)
+          Audit log · N events  [Show ▾] → AG Grid with sorting, filters, badges, quick search
+
+Inventory Own page: item, in stock (editable), reorder at, usual order, max price, last paid.
+          Setting stock below the reorder level starts a restock and switches to Activity.
+
+Policy    Own page: the 7 rules in plain words, in evaluation order, each tagged "blocks" or "asks you".
 ```
+
+**Tracker headlines** (one sentence per stage): "Agents are negotiating with …", "Deal agreed", "Checking your spending rules", "Waiting for your approval", "Paying …", "Paid $X to … · Approved by your rules / by you", "Blocked: no money moved" (with the reason in red), "You declined this payment", "Approval expired: no payment", "No deal this time", "Payment didn't go through".
+
+**Progress steps:** the "Your approval" step only appears when a payment is actually held, so routine runs stay a 4-step journey. A failed step turns red and is renamed "Blocked", "No deal", "Denied" or "Expired". The active step pulses, and the pulse switches off for users who prefer reduced motion.
+
+**Calm by default:**
+- The negotiation and checks drawers start closed and close again when a new run starts.
+- While a run is updating, they stay however you left them.
+- Each block redraws only when its data changed, so open drawers, scroll positions and clicks are never disturbed.
+- The audit grid is only created the first time the log is opened.
+
+Under 820 px wide, the sidebar becomes a top bar.
 
 ### Endpoints
 | Method | Path | Does |
@@ -396,7 +413,8 @@ Bottom:  Audit log, full width: AG Grid with sorting, filters, coloured status b
 | GET | `/health` | `{"ok": true}`, for the host's health check |
 | GET | `/inventory` | Stock, reorder levels, last paid price, `low` flag |
 | PATCH | `/inventory/{item}` | `{"stock": n}`. Below the reorder level, it starts a negotiated restock (needs the LLM) |
-| GET | `/runs/latest` | The latest run's full state, plus the runner state (busy, job, last error, log) |
+| GET | `/runs/latest` | The latest run's full state (incl. supplier name, unit), plus the runner state (busy, job, last error, log) |
+| GET | `/runs?limit=10` | One-line summaries of recent runs, newest first (for "Earlier") |
 | GET | `/runs/{id}` | One run: offers, deal, decision, approval, payment, `stage` |
 | GET | `/runs/{id}/authorization` | Authorization record JSON |
 | GET | `/approvals?status=pending` | The queue. Expired approvals are moved to `expired` first |
@@ -446,6 +464,15 @@ The first live run of C ended `no_deal`. The shop knew it last paid $2.00, held 
 
 After this change, C plays out as the spec describes: the shop accepts 20 × $2.70 = $54 to "secure our essential restock before production halts", and the policy blocks it. That's the core story: **the agent's own limits allowed the price, and the owner's rule caught the 35% jump.**
 
+### Order quantity fix (found by the owner while testing)
+Setting cooking oil to 0 made the shop ask for 20 L, even though it needed at least 25 L to get back to its reorder level. The shop's limits were min = `reorder_level − stock` = 25 and max = `reorder_qty` = 20, and the opening request used `reorder_qty`. No quantity could satisfy both, so the run could never end in a valid deal.
+
+The fix is `restock.order_quantities()`:
+- **min** = `reorder_level − stock`
+- **target** = `max(reorder_qty, min)`
+
+The opening request and the shop's maximum both use the target, so oil at 0 now asks for 25 L. Scenarios A, B and C keep the same numbers: 500, 120, 20. Tests cover all four cases, plus a full run from oil at 0 to approved and paid. Verified live: oil at 0 → request 25 L → 4 rounds → $2.35/L → paid $58.75.
+
 ### Model logging
 `app/llm.py` now logs which model answered each call, with time and tokens, plus every 429/5xx and fallback. Reason: on Nov 9 calls sometimes took 12–14 s where they'd taken ~1 s on Nov 7. The logs showed `gemini-3.5-flash-lite` itself answering slowly at times (no fallback involved), so the slowness was on Google's side. Typical calls are ~1 s.
 
@@ -453,11 +480,12 @@ After this change, C plays out as the spec describes: the shop accepts 20 × $2.
 | File | Purpose |
 |------|---------|
 | `app/web/main.py` | `create_app(runner)` with every endpoint; `create_app_from_env()` wires production |
-| `app/web/templates/index.html` | The page |
-| `app/web/static/app.js` | Polling, rendering, buttons, AG Grid setup |
-| `app/web/static/style.css` | Colour variables (green, amber, red for decisions), layout, stacks to one column under 900 px |
+| `app/web/templates/index.html` | Sidebar plus three views (Activity, Inventory, Policy), switched by URL hash |
+| `app/web/static/app.js` | Polling, view switching, tracker (headline, steps, approve), drawers, history, lazy AG Grid |
+| `app/web/static/style.css` | Colour variables (green, amber, red), tracker steps, sidebar; top bar under 820 px |
 | `app/runner.py` | Background jobs with a lock: scenarios, manual restock, approve/deny then pay, reset |
-| `app/views.py` | Data for the page: inventory, run detail with stage, approvals, audit list |
+| `app/views.py` | Data for the page: inventory, run detail with stage, recent runs, approvals, audit list |
+| `app/restock.py` | Adds `order_quantities()` (the quantity fix) |
 | `app/approvals.py` | Adds `decide()` (approve or deny, atomically) |
 | `app/authorization.py` | Authorization record builder |
 | `app/seed.py` | General scenario overrides (inventory fields, supplier prices) |
@@ -490,6 +518,22 @@ After this change, C plays out as the spec describes: the shop accepts 20 × $2.
 | Authorization record | A: `authorized_by: policy`, 7 passing checks, rules in force, invoice, batch, item and invoice payment IDs |
 | Reset | Seed restored, run, queue and audit cleared |
 | Console | No JavaScript errors |
+
+**Redesign, re-tested live (Nov 9):**
+| Check | Result |
+|---|---|
+| Oil at 0 (the bug) | Inventory page → set 0 → switches to Activity: "Cooking oil · **25 litre**" → paid $58.75 |
+| Tracker | One headline per stage, pulsing while live, steps turn green, chat folded away |
+| B approval in the tracker | Amber "Your approval" step, Activity badge **1**, Approve inside the card → "Paid $105.60 · Approved by you" |
+| C | Red "Blocked" step, "Blocked: no money moved", the reason in red, drawers closed |
+| Policy checks drawer | ✓ / ✕ per rule in plain words, later rules "not reached", authorization link |
+| Drawers | Stay open while the same run updates; close when a new run starts (checked by feeding a new run ID) |
+| Earlier list | After a manual pouch restock, run C shows as "Cooking oil · 20 litre · $54.00 · Blocked" with its reason |
+| Audit log | Collapsed bar "8 events · Show"; grid created on first open, all rows present |
+| Policy page | Its own view, 7 rules in plain words with "blocks" / "asks you" |
+| Console | No JavaScript errors |
+
+**Offline: 78 tests pass** (6 new: four quantity cases, the oil-at-0 run, and the recent-runs list with run fields).
 
 ### Known limits / later
 - Hosting on Render is the next feature. `/health` is ready for it.

@@ -93,6 +93,14 @@ def create_app(runner: Runner, *, llm_label: str) -> FastAPI:
             c.close()
         return {"runner": runner_state(), "detail": detail}
 
+    @app.get("/runs")
+    def list_runs(limit: int = 10):
+        c = conn()
+        try:
+            return views.recent_runs(c, max(1, min(limit, 50)))
+        finally:
+            c.close()
+
     @app.get("/runs/{run_id}")
     def get_run(run_id: str):
         c = conn()

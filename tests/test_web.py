@@ -41,9 +41,11 @@ def test_page_renders_with_policy_and_scenarios(env):
     client, *_ = env
     html = client.get("/").text
     assert "Restocking Agents" in html and "ag-grid-community@36.2.0" in html
-    assert SUPPLIER in html and "≤ $150.00" in html
+    assert SUPPLIER in html and "No single order above $150.00" in html
     for s in ("Routine restock", "Large order", "Price spike"):
         assert s in html
+    for view in ("view-activity", "view-inventory", "view-policy", 'href="#inventory"', 'href="#policy"'):
+        assert view in html
 
 
 def test_inventory_and_policy(env):
@@ -199,3 +201,16 @@ def test_unknown_things_404(env):
     assert client.get("/runs/run_nope").status_code == 404
     assert client.get("/runs/run_nope/authorization").status_code == 404
     assert client.post("/approvals/999", json={"approve": True}).status_code == 404
+
+
+def test_runs_list_and_run_detail_fields(env):
+    client, *_ = env
+    assert client.get("/runs").json() == []
+    client.post("/scenarios/c")  # each scenario resets the DB first, so check them one at a time
+    [c] = client.get("/runs?limit=5").json()
+    assert c["outcome"] == "blocked" and c["rule"] == "price_spike" and "35%" in c["reason"] and c["unit"] == "litre"
+    client.post("/scenarios/a")
+    [a] = client.get("/runs?limit=5").json()
+    assert a["outcome"] == "paid" and a["total"] == 55.0 and a["qty"] == 500 and a["unit"] == "pouch"
+    d = client.get("/runs/latest").json()["detail"]
+    assert d["run"]["supplier_name"] == "Nairobi Packaging & Produce" and d["run"]["unit"] == "pouch"

@@ -49,8 +49,11 @@ def run_detail(conn: sqlite3.Connection, run_id: str) -> dict | None:
                                 (deal["id"],)).fetchone()
         payment = conn.execute("SELECT * FROM payments WHERE deal_id = ? ORDER BY id LIMIT 1",
                                (deal["id"],)).fetchone()
+    sup = conn.execute("SELECT name FROM suppliers WHERE id = ?", (run["supplier_id"],)).fetchone()
+    inv = conn.execute("SELECT unit FROM inventory WHERE item = ?", (run["item"],)).fetchone()
     return {
         "run": {"id": run["id"], "item": run["item"], "supplier_id": run["supplier_id"],
+                "supplier_name": sup["name"] if sup else run["supplier_id"], "unit": inv["unit"] if inv else "",
                 "started_at": run["started_at"], "outcome": run["outcome"]},
         "stage": _stage(run, deal, decision, approval, payment),
         "offers": [{
@@ -78,6 +81,19 @@ def run_detail(conn: sqlite3.Connection, run_id: str) -> dict | None:
             "error": payment["error"],
         },
     }
+
+
+def recent_runs(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
+    """One-line summaries, newest first, for the 'earlier' list under the tracker."""
+    rows = conn.execute(
+        """SELECT r.id, r.item, r.started_at, r.outcome, d.qty, d.total, i.unit,
+                  (SELECT dc.rule FROM decisions dc WHERE dc.deal_id = d.id ORDER BY dc.id LIMIT 1) AS rule,
+                  (SELECT dc.reason FROM decisions dc WHERE dc.deal_id = d.id ORDER BY dc.id LIMIT 1) AS reason
+           FROM runs r LEFT JOIN deals d ON d.run_id = r.id LEFT JOIN inventory i ON i.item = r.item
+           ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?""", (limit,)).fetchall()
+    return [{"id": r["id"], "item": r["item"], "unit": r["unit"], "started_at": r["started_at"],
+             "outcome": r["outcome"], "qty": r["qty"], "total": _f(r["total"]), "rule": r["rule"],
+             "reason": r["reason"]} for r in rows]
 
 
 def latest_run_id(conn: sqlite3.Connection) -> str | None:

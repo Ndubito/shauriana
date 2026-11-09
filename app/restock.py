@@ -41,12 +41,24 @@ def new_run_id() -> str:
     return f"{utcnow():%m%d%H%M%S}_{secrets.token_hex(2)}"
 
 
+def order_quantities(inv: sqlite3.Row) -> tuple[int, int]:
+    """(min_qty, target_qty) for a restock.
+
+    min: enough to get back to the reorder level. target: the usual order, or the minimum if
+    stock has fallen so far that the usual order wouldn't cover it (e.g. oil at 0 with reorder
+    level 25 and usual order 20 -> 25). The target is also the most the shop will buy.
+    """
+    min_qty = max(1, inv["reorder_level"] - inv["stock"])
+    return min_qty, max(inv["reorder_qty"], min_qty)
+
+
 def limits_for(inv: sqlite3.Row, sup: sqlite3.Row, today: date) -> tuple[ShopLimits, SupplierLimits]:
     item = inv["item"]
+    min_qty, target_qty = order_quantities(inv)
     shop = ShopLimits(
         max_unit_price=Decimal(inv["max_unit_price"]),
-        min_qty=max(1, inv["reorder_level"] - inv["stock"]),
-        max_qty=inv["reorder_qty"],
+        min_qty=min_qty,
+        max_qty=target_qty,
         latest_delivery=today + timedelta(days=inv["latest_delivery_days"]),
     )
     supplier = SupplierLimits(
@@ -95,11 +107,11 @@ def run_restock(conn: sqlite3.Connection, scenario: dict, *, rules: Rules, gatew
     else:
         shop_limits, supplier_limits = limits_for(inv, sup, today)
         shop = ShopAgent(llm, shop_name="the shop", item=item, unit=inv["unit"], limits=shop_limits,
-                         requested_qty=inv["reorder_qty"], last_paid=inv["last_paid_unit_price"],
+                         requested_qty=shop_limits.max_qty, last_paid=inv["last_paid_unit_price"],
                          stock=inv["stock"], reorder_level=inv["reorder_level"])
         supplier = SupplierAgent(llm, supplier_name=sup["name"], item=item, unit=inv["unit"],
                                  limits=supplier_limits, list_price=json.loads(sup["list_prices"])[item])
-        terms = negotiate(conn, run_id=run_id, item=item, request_qty=inv["reorder_qty"], shop=shop,
+        terms = negotiate(conn, run_id=run_id, item=item, request_qty=shop_limits.max_qty, shop=shop,
                           supplier=supplier, shop_limits=shop_limits, supplier_limits=supplier_limits,
                           max_rounds=max_rounds, today=today, log=log)
         if isinstance(terms, NoDeal):
