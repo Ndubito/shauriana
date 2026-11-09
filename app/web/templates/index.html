@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Restocking Agents</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@36.2.0/dist/ag-grid-community.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <h1>Restocking Agents <span>with Spending Guardrails</span></h1>
+    <p class="sub">The agents negotiate. Code decides whether money moves. · <span class="muted">{{ llm_label }}</span></p>
+  </div>
+  <nav class="actions">
+    {% for s in scenarios %}
+    <button class="btn scenario" data-scenario="{{ s.key }}"><b>{{ s.key|upper }}</b> {{ s.title }}</button>
+    {% endfor %}
+    <button class="btn ghost" id="reset">Reset</button>
+  </nav>
+</header>
+
+<main class="layout">
+  <section class="col-left">
+    <div class="card">
+      <h2>Inventory</h2>
+      <table class="inv">
+        <thead><tr><th>Item</th><th class="num">Stock</th><th class="num">Reorder at</th><th class="num">Last paid</th><th></th></tr></thead>
+        <tbody id="inventory"></tbody>
+      </table>
+      <p class="hint">Set a stock below its reorder level to start a restock.</p>
+    </div>
+
+    <div class="card">
+      <h2>Policy <span class="tag">read-only · v{{ policy.version }}</span></h2>
+      <dl class="policy">
+        <dt>Approved payees</dt><dd>{% for p in policy.approved_payees %}<code>{{ p }}</code>{% endfor %}</dd>
+        <dt>Per order</dt><dd>≤ ${{ '%.2f'|format(policy.max_per_order) }}</dd>
+        <dt>Per 7 days</dt><dd>≤ ${{ '%.2f'|format(policy.max_per_week) }}</dd>
+        <dt>Owner approval</dt><dd>above ${{ '%.2f'|format(policy.require_approval_above) }}</dd>
+        <dt>Price rise</dt><dd>≤ {{ policy.max_unit_price_increase_pct|int }}% over last paid</dd>
+        <dt>Approval timeout</dt><dd>{{ policy.approval_timeout_hours }} h, then denied</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="col-right">
+    <div class="card run">
+      <div class="run-head">
+        <h2>Live run</h2>
+        <span id="run-id" class="muted mono"></span>
+        <span id="stage" class="pill">idle</span>
+      </div>
+      <div id="transcript" class="transcript"><p class="empty">Pick a scenario to start a restock.</p></div>
+    </div>
+
+    <div id="banner" class="banner hidden">
+      <div class="banner-title"><span id="banner-icon"></span><span id="banner-status"></span></div>
+      <div id="banner-reason" class="banner-reason"></div>
+      <div id="banner-meta" class="banner-meta"></div>
+    </div>
+
+    <div class="card">
+      <h2>Approval queue</h2>
+      <div id="approvals"><p class="empty">Nothing waiting for the owner.</p></div>
+    </div>
+  </section>
+
+  <section class="card full">
+    <div class="audit-head">
+      <h2>Audit log</h2>
+      <input id="quick" type="search" placeholder="Search the log…" aria-label="Search the audit log">
+    </div>
+    <div id="audit-grid" class="grid"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden" role="status"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

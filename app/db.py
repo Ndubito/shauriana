@@ -123,9 +123,12 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     path = path or db_path_from_env()
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, isolation_level=None)  # autocommit; use explicit BEGIN
+    # autocommit (explicit BEGIN where needed); one connection per thread
+    conn = sqlite3.connect(path, isolation_level=None, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if path != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")  # the page can read while a run writes
     conn.executescript(SCHEMA)
     return conn
 

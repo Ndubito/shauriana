@@ -95,7 +95,8 @@ def run_restock(conn: sqlite3.Connection, scenario: dict, *, rules: Rules, gatew
     else:
         shop_limits, supplier_limits = limits_for(inv, sup, today)
         shop = ShopAgent(llm, shop_name="the shop", item=item, unit=inv["unit"], limits=shop_limits,
-                         requested_qty=inv["reorder_qty"], last_paid=inv["last_paid_unit_price"])
+                         requested_qty=inv["reorder_qty"], last_paid=inv["last_paid_unit_price"],
+                         stock=inv["stock"], reorder_level=inv["reorder_level"])
         supplier = SupplierAgent(llm, supplier_name=sup["name"], item=item, unit=inv["unit"],
                                  limits=supplier_limits, list_price=json.loads(sup["list_prices"])[item])
         terms = negotiate(conn, run_id=run_id, item=item, request_qty=inv["reorder_qty"], shop=shop,

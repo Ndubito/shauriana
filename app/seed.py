@@ -40,15 +40,32 @@ def reset(conn: sqlite3.Connection, seed: dict) -> None:
         raise
 
 
+INVENTORY_FIELDS = {"stock", "reorder_level", "reorder_qty", "max_unit_price", "latest_delivery_days",
+                    "last_paid_unit_price"}
+SUPPLIER_PRICE_FIELDS = {"floor_prices", "list_prices"}
+
+
 def apply_scenario(conn: sqlite3.Connection, seed: dict, name: str) -> dict:
-    """Reset, then apply the scenario's stock changes. Returns the scenario definition."""
+    """Reset, then apply the scenario's overrides. Returns the scenario definition.
+
+    Overrides: "inventory": {item: {field: value}} and
+               "suppliers": {supplier_id: {"floor_prices"|"list_prices": {item: price}}}
+    """
     scenarios = seed.get("scenarios", {})
     if name not in scenarios:
         raise KeyError(f"Unknown scenario {name!r}; known: {sorted(scenarios)}")
     scenario = scenarios[name]
     reset(conn, seed)
-    for item, stock in scenario.get("set_stock", {}).items():
-        conn.execute("UPDATE inventory SET stock = ? WHERE item = ?", (stock, item))
-    for item, price in scenario.get("set_last_paid", {}).items():
-        conn.execute("UPDATE inventory SET last_paid_unit_price = ? WHERE item = ?", (price, item))
+    for item, fields in scenario.get("inventory", {}).items():
+        for field, value in fields.items():
+            if field not in INVENTORY_FIELDS:
+                raise KeyError(f"Scenario {name}: unknown inventory field {field!r}")
+            conn.execute(f"UPDATE inventory SET {field} = ? WHERE item = ?", (value, item))
+    for sup_id, fields in scenario.get("suppliers", {}).items():
+        for field, prices in fields.items():
+            if field not in SUPPLIER_PRICE_FIELDS:
+                raise KeyError(f"Scenario {name}: unknown supplier field {field!r}")
+            row = conn.execute(f"SELECT {field} FROM suppliers WHERE id = ?", (sup_id,)).fetchone()
+            merged = {**json.loads(row[0]), **prices}
+            conn.execute(f"UPDATE suppliers SET {field} = ? WHERE id = ?", (json.dumps(merged), sup_id))
     return scenario

@@ -6,6 +6,7 @@ reply is JSON matching the schema (read from response.parsed). If a model is ove
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,8 @@ from pydantic import BaseModel
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_FALLBACKS = "gemini-3.5-flash"
 RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
+log = logging.getLogger("llm")
 
 
 class LLMError(RuntimeError):
@@ -91,6 +94,7 @@ class GeminiLLM:
                     )
                 except errors.APIError as e:
                     last_error = f"{model}: {e.code} {e.status}"
+                    log.warning("%s (attempt %d, %.1fs)", last_error, attempt + 1, time.monotonic() - start)
                     if e.code in RETRYABLE_CODES:
                         if attempt == 0:
                             time.sleep(1.5)
@@ -98,12 +102,15 @@ class GeminiLLM:
                         break  # try the next model
                     raise LLMError(last_error) from e
                 meta = resp.usage_metadata
-                self.usage.calls.append(CallStats(
+                stats = CallStats(
                     model, time.monotonic() - start,
                     getattr(meta, "prompt_token_count", 0) or 0,
                     getattr(meta, "candidates_token_count", 0) or 0,
                     getattr(meta, "thoughts_token_count", 0) or 0,
-                ))
+                )
+                self.usage.calls.append(stats)
+                log.info("%s answered in %.1fs (%d in / %d out / %d thinking)", model, stats.seconds,
+                         stats.input_tokens, stats.output_tokens, stats.thought_tokens)
                 if resp.parsed is None:
                     raise LLMError(f"{model}: reply did not match the schema: {(resp.text or '')[:200]!r}")
                 return resp.parsed
