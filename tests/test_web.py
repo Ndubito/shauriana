@@ -214,3 +214,46 @@ def test_runs_list_and_run_detail_fields(env):
     assert a["outcome"] == "paid" and a["total"] == 55.0 and a["qty"] == 500 and a["unit"] == "pouch"
     d = client.get("/runs/latest").json()["detail"]
     assert d["run"]["supplier_name"] == "Nairobi Packaging & Produce" and d["run"]["unit"] == "pouch"
+
+
+# ---- public demo rate limit ------------------------------------------------
+
+def test_rate_limiter_rolling_window():
+    from app.runner import RateLimited, RateLimiter
+    now = [0.0]
+    lim = RateLimiter(2, window=3600, clock=lambda: now[0])
+    lim.check(); lim.record()
+    now[0] = 600; lim.check(); lim.record()
+    now[0] = 1200
+    with pytest.raises(RateLimited, match="about 40 minutes"):
+        lim.check()  # oldest run (t=0) frees up at t=3600
+    now[0] = 3600
+    lim.check()  # first run has left the window
+    assert RateLimiter(0).check() is None  # 0 = no limit
+
+
+def test_api_refuses_runs_over_the_limit_with_429(env):
+    from app.runner import RateLimiter
+    client, runner, gateways, _ = env
+    runner.limiter = RateLimiter(2)
+    assert client.post("/scenarios/a").status_code == 202
+    assert client.post("/scenarios/c").status_code == 202
+    r = client.post("/scenarios/b")
+    assert r.status_code == 429 and "Demo limit reached (2 restocks per hour)" in r.json()["detail"]
+    # The refused run changed nothing: C is still the latest run.
+    assert client.get("/runs/latest").json()["detail"]["run"]["item"] == "cooking_oil_l"
+    # Reset is not a restock and is never limited.
+    assert client.post("/reset").status_code == 202
+
+
+def test_refused_or_busy_runs_do_not_use_up_the_limit(env):
+    from app.runner import RateLimiter
+    client, runner, *_ = env
+    runner.limiter = RateLimiter(1)
+    assert runner._lock.acquire(blocking=False)  # a job is running
+    try:
+        assert client.post("/scenarios/a").status_code == 409  # busy, not counted
+    finally:
+        runner._lock.release()
+    assert client.post("/scenarios/a").status_code == 202  # still allowed
+    assert client.post("/scenarios/a").status_code == 429

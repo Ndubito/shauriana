@@ -5,6 +5,7 @@ Start:  uvicorn app.web.main:create_app_from_env --factory
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from app import approvals, authorization, db, views
 from app.restock import RestockError
-from app.runner import Busy, Runner
+from app.runner import Busy, RateLimited, RateLimiter, Runner
 
 HERE = Path(__file__).resolve().parent
 
@@ -79,7 +80,7 @@ def create_app(runner: Runner, *, llm_label: str) -> FastAPI:
             try:
                 runner.start_item_restock(item)
                 started = True
-            except (Busy, RestockError) as e:
+            except (Busy, RestockError, RateLimited) as e:
                 note = str(e)
         return {"item": item, "stock": body.stock, "low": low, "run_started": started, "note": note}
 
@@ -163,6 +164,8 @@ def create_app(runner: Runner, *, llm_label: str) -> FastAPI:
             raise HTTPException(404, f"No scenario {name}")
         except Busy as e:
             raise HTTPException(409, str(e))
+        except RateLimited as e:
+            raise HTTPException(429, str(e))
         return {"started": name.lower()}
 
     @app.post("/reset", status_code=202)
@@ -206,6 +209,9 @@ def create_app_from_env() -> FastAPI:
     finally:
         c.close()
 
+    # Public demo guard: restocks per rolling hour across the whole site (0 turns it off).
+    max_runs = int(os.getenv("DEMO_MAX_RUNS_PER_HOUR", "20"))
     runner = Runner(db_path=db_path, rules=rules, seed_data=seed_data, shop_email=settings.shop.email,
-                    gateway_factory=lambda: PayPalGateway(settings), llm=llm)
+                    gateway_factory=lambda: PayPalGateway(settings), llm=llm, limiter=RateLimiter(max_runs))
+    logging.getLogger("app").info("demo limit: %s restocks per hour", max_runs or "no")
     return create_app(runner, llm_label=llm_label)

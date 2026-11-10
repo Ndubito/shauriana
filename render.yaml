@@ -1,0 +1,39 @@
+# Render Blueprint: one free Python web service built from this repo.
+# Secrets (sync: false) are entered in the Render dashboard when the Blueprint is created;
+# they are never stored in the repo.
+services:
+  - type: web
+    name: restocking-agents
+    runtime: python
+    plan: free
+    region: frankfurt            # closest Render region to Nairobi; can't be changed later
+    buildCommand: pip install -r requirements.txt
+    # One worker on purpose: the job lock and the SQLite database live in one process.
+    startCommand: uvicorn app.web.main:create_app_from_env --factory --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: SHOP_CLIENT_ID
+        sync: false
+      - key: SHOP_CLIENT_SECRET
+        sync: false
+      - key: SHOP_SANDBOX_EMAIL
+        sync: false
+      - key: SUPPLIER_CLIENT_ID
+        sync: false
+      - key: SUPPLIER_CLIENT_SECRET
+        sync: false
+      - key: SUPPLIER_SANDBOX_EMAIL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gemini-3.5-flash-lite
+      - key: LLM_FALLBACK_MODELS
+        value: gemini-3.5-flash
+      - key: DEMO_MAX_RUNS_PER_HOUR
+        value: "20"
+      - key: DATABASE_URL           # on the service's ephemeral disk; reseeds itself on boot
+        value: sqlite:///./data.db
