@@ -8,7 +8,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 | 2 | [Scenario A end to end (fixed deal + policy engine)](#2-scenario-a-end-to-end-fixed-deal--policy-engine) | `feature/scenario-a` | ✅ Done, merged Nov 7, 2026 |
 | 3 | [LLM negotiation](#3-llm-negotiation) | `feature/llm-negotiation` | ✅ Done, merged Nov 7, 2026 |
 | 4 | [Web page, approvals and Scenarios B and C](#4-web-page-approvals-and-scenarios-b-and-c) | `feature/web-app` | ✅ Done, merged Nov 9, 2026 |
-| 5 | [Hosting on Render](#5-hosting-on-render) | `feature/render` | ✅ Done, tested live Nov 10, 2026 |
+| 5 | [Hosting on Render](#5-hosting-on-render) | `feature/render` | ✅ Done, merged Nov 11, 2026 |
 
 ---
 
