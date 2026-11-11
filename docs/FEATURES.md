@@ -9,6 +9,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 | 3 | [LLM negotiation](#3-llm-negotiation) | `feature/llm-negotiation` | ✅ Done, merged Nov 7, 2026 |
 | 4 | [Web page, approvals and Scenarios B and C](#4-web-page-approvals-and-scenarios-b-and-c) | `feature/web-app` | ✅ Done, merged Nov 9, 2026 |
 | 5 | [Hosting on Render](#5-hosting-on-render) | `feature/render` | ✅ Done, merged Nov 11, 2026 |
+| 6 | [README and submission text](#6-readme-and-submission-text) | `feature/readme` | ✅ Done, tested Nov 11, 2026 |
 
 ---
 
@@ -615,3 +616,48 @@ These live runs show that PayPal sandbox calls, Gemini calls and TLS (via `trust
 - After merging, switch the Render service's branch from `feature/render` to `main` (Render dashboard → service → Settings → Branch).
 - The uptime monitor is set up in the owner's own account (outside the repo).
 - README with setup steps, the Payouts caveat and the tools list is the next feature.
+
+---
+
+## 6. README and submission text
+
+### What it is
+The material judges read first, covering the spec's submission checklist: a text description (problem, user, how it works, what's real and what's a stand-in), a tools section, setup steps that work from a fresh clone, and a README that states the Payouts caveat and lists the demo scenarios.
+
+### What was built
+| File | Content |
+|---|---|
+| `README.md` | One-line pitch and live link; credit to Nathan Achar ([@Ndubito](https://github.com/Ndubito)); three screenshots from the live site (paid, held, blocked); the problem and user; a Mermaid flow diagram (GitHub draws it); how a run works; the 3 scenarios and why each outcome is fixed; the 7 policy rules; **tools used** (every PayPal call and what it does, Gemini with structured output, FastAPI, AG Grid, SQLite, Render, pytest, and "built solo with AI coding assistance (Claude Code)"); **real vs stand-in**, including the Payouts caveat and an honest note that invoices use the Invoicing REST API rather than the Agent Toolkit; setup from a clean clone with a `.env` table; terminal tools; API; project layout; tests; judge Q&A |
+| `docs/images/*.jpg` | Screenshots of the live site taken on Nov 11 |
+| `docs/SUBMISSION.md` | Devpost text ready to paste: name, tagline, links, inspiration, what it does, how we built it, challenges (taken from this build log), accomplishments, what we learned, what's next, built-with tags, real vs stand-in |
+| `docs/VIDEO_SCRIPT.md` | A six-scene script under 3 minutes for the current layout: exact clicks, lines to say, prep checklist (wake the site, Reset, PayPal sandbox tab), and what to do if a run is slow, busy or rate-limited |
+
+Decisions agreed with the owner: no Agent Toolkit claim (state the direct REST use honestly); disclose AI coding assistance; credit Nathan Achar and link the GitHub profile, with no email or other contact details.
+
+### Fix found while testing: LLM setup errors were hidden
+`create_app_from_env()` caught *any* Gemini setup error and labelled the page "fixed deals (no LLM_API_KEY)" without logging anything. A broken install would have been mislabelled and left no trace. It now:
+- logs `LLM disabled, using fixed deals: <error>`
+- says "no LLM_API_KEY" only when the key really is missing, and otherwise "LLM setup failed: see server log"
+
+There's a test for both cases.
+
+### Test results (Nov 11, 2026)
+**Fresh clone, following the README exactly:**
+- `git clone` of the branch from GitHub into an empty folder, then `python -m venv .venv`, then `pip install -r requirements.txt`, then `cp .env.example .env`
+- **82 tests pass with the `.env` still unfilled**, confirming "no network or keys needed"
+- with `.env` filled in, the server starts with the README's command; `/health`, `/` and `/policy` answer, and the policy shows the payee from `.env`
+
+The fresh-clone server showed "fixed deals (no LLM_API_KEY)" because the developer's local `.env` currently has an empty `LLM_API_KEY` (the key lives in Render). That was correct behaviour, and it's what exposed the hidden-error problem above. Gemini on a clean install is already shown by the Render deploy, which negotiated A, B and C live.
+
+**README checks:**
+- every relative link in the README points to a file that exists
+- the LICENSE holder reads "Nathan Achar"
+- test counts in the README and submission text match the suite (82)
+
+**Live site while taking screenshots:** A paid, B waiting for approval, C blocked, all on https://restocking-agents.onrender.com. The first request after idle took **33 s** (cold start), which matches the README's note that the first load can take up to a minute.
+
+**Offline: 82 tests pass** (1 new: LLM setup failure is logged and labelled).
+
+### Known limits / later
+- The video link in the README and `SUBMISSION.md` is a placeholder until the video is on YouTube.
+- An uptime monitor on `/health` is still recommended so judges don't hit the cold start.

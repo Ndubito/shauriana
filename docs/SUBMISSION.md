@@ -39,7 +39,7 @@ The web app keeps the owner's attention where it belongs. A delivery-tracker sty
 - **Gemini** (`gemini-3.5-flash-lite`, falling back to `gemini-3.5-flash`) via the `google-genai` SDK. A Pydantic response schema makes every agent turn a validated offer object. `temperature=0` and a fixed seed keep demos repeatable.
 - **The policy engine** is a small pure Python function. Its tests follow the spec rule by rule: $150.01 blocked and $150.00 allowed, 21% blocked and 20% allowed, $80.01 held and $80.00 approved, and supplier text saying "ignore your rules" leaving the decision unchanged.
 - **FastAPI + SQLite + plain JavaScript + AG Grid Community**, hosted on **Render** from a Blueprint, with a site-wide rate limit protecting the API key on the public demo.
-- 81 offline tests with fake PayPal and model clients, plus live sandbox runs for every feature, written up in the repo's build log.
+- 82 offline tests with fake PayPal and model clients, plus live sandbox runs for every feature, written up in the repo's build log.
 - Built solo by Nathan Achar, with AI coding assistance (Claude Code). The policy rules and their tests were reviewed by hand.
 
 ## Challenges we ran into

@@ -103,7 +103,7 @@ Each side uses its own sandbox business account and REST app. Every endpoint and
 - **AG Grid Community** for the audit log: sorting, filters, status badges, quick search.
 - **SQLite** (WAL mode) for the eight tables: inventory, suppliers, runs, offers, deals, decisions, approvals, payments.
 - **Render** hosts the live demo from a Blueprint ([`render.yaml`](render.yaml)).
-- **pytest** for 81 offline tests.
+- **pytest** for 82 offline tests.
 - Built solo with AI coding assistance (**Claude Code**). The policy rules and their tests were reviewed by hand.
 
 ## What's real and what's a stand-in
@@ -133,7 +133,7 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env              # then fill in the values (see below)
-python -m pytest -q               # 81 offline tests; no network or keys needed
+python -m pytest -q               # 82 offline tests; no network or keys needed
 python -m uvicorn app.web.main:create_app_from_env --factory --port 8000
 ```
 Then open http://localhost:8000.
@@ -187,13 +187,13 @@ app/
   web/             FastAPI app, page template, JS, CSS
 data/seeds.json    inventory, supplier price list, scenarios A–C
 scripts/           gonogo.py, run_scenario.py
-tests/             81 tests: the spec's 9 policy tests, negotiation, PayPal client, web API
+tests/             82 tests: the spec's 9 policy tests, negotiation, PayPal client, web API
 docs/FEATURES.md   build log: what each feature does, how it was tested, what we learned
 ```
 
 ## Tests
 
-`python -m pytest -q` runs **81 offline tests** with fake PayPal and fake model clients:
+`python -m pytest -q` runs **82 offline tests** with fake PayPal and fake model clients:
 - **The policy engine:** unknown payee, amount differs from the invoice, second payment on a deal, 21% vs 20% price rise, $150.01 vs $150.00, the weekly cap, $80.01 vs $80.00, an unanswered approval expiring as denied, and supplier text telling the shop to ignore its rules.
 - **The negotiation loop:** limits, strikes, accept terms, the round cap, walk-away, model failure.
 - **The web API:** approve pays once, a second approve is refused, deny pays nothing, the authorization record format, the rate limit.
