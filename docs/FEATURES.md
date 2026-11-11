@@ -8,6 +8,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 | 2 | [Scenario A end to end (fixed deal + policy engine)](#2-scenario-a-end-to-end-fixed-deal--policy-engine) | `feature/scenario-a` | ✅ Done, merged Nov 7, 2026 |
 | 3 | [LLM negotiation](#3-llm-negotiation) | `feature/llm-negotiation` | ✅ Done, merged Nov 7, 2026 |
 | 4 | [Web page, approvals and Scenarios B and C](#4-web-page-approvals-and-scenarios-b-and-c) | `feature/web-app` | ✅ Done, merged Nov 9, 2026 |
+| 5 | [Hosting on Render](#5-hosting-on-render) | `feature/render` | ✅ Done, tested live Nov 10, 2026 |
 
 ---
 
@@ -540,3 +541,77 @@ The opening request and the shop's maximum both use the target, so oil at 0 now 
 - The sandbox payout takes about 20 s, so the stage shows "paying" for a while. Fine for the video, but worth knowing.
 - Scenario D (payee swap) remains optional. The rule is already covered by tests.
 - No login (out of scope in the spec). On a public URL, anyone can press the buttons. It's sandbox money only.
+
+---
+
+## 5. Hosting on Render
+
+### What it is
+The app runs publicly at **https://restocking-agents.onrender.com**, built straight from the GitHub repo by a Render Blueprint (`render.yaml`). Judges can open the link and run Scenarios A, B and C with no setup. Pushes to the deployed branch redeploy automatically.
+
+### What was built
+| Piece | Detail |
+|---|---|
+| `render.yaml` | One `type: web`, `runtime: python`, `plan: free` service in **Frankfurt** (the closest Render region to Nairobi, fixed at creation). `buildCommand: pip install -r requirements.txt`, `healthCheckPath: /health`, `autoDeployTrigger: commit`. |
+| Start command | `uvicorn app.web.main:create_app_from_env --factory --host 0.0.0.0 --port $PORT --workers 1` |
+| `.python-version` | `3.14`, the version the app is tested on |
+| Secrets | The 7 secrets (`SHOP_CLIENT_ID`, `SHOP_CLIENT_SECRET`, `SHOP_SANDBOX_EMAIL`, `SUPPLIER_CLIENT_ID`, `SUPPLIER_CLIENT_SECRET`, `SUPPLIER_SANDBOX_EMAIL`, `LLM_API_KEY`) are declared with `sync: false`. Render asks for them when the Blueprint is created, and they never appear in the repo. Non-secret settings (`PAYPAL_ENV`, `LLM_MODEL`, `LLM_FALLBACK_MODELS`, `DEMO_MAX_RUNS_PER_HOUR`, `DATABASE_URL`) have fixed values in the file. |
+| Demo rate limit | `app/runner.py` `RateLimiter` (see below) |
+
+**Why exactly one worker:** the job lock and the SQLite database live in one process. A second worker would have its own lock and could run two jobs against the same database at once.
+
+**The schema settings were checked against Render's docs on Nov 10, 2026:**
+- `runtime` replaces the old `env`
+- `autoDeployTrigger` replaces the old `autoDeploy`
+- `PYTHON_VERSION` and `.python-version` pin the Python version
+- Free web services sleep after 15 minutes idle, take about a minute to wake, and lose their disk on every restart, redeploy or sleep
+- Each workspace gets 750 free hours a month
+
+### Public demo rate limit
+With no login, anyone with the URL can start runs. Sandbox money isn't real, but every run makes real Gemini calls on the owner's API key. `RateLimiter` allows at most **`DEMO_MAX_RUNS_PER_HOUR` restocks (default 20) in any rolling hour across the whole site**.
+- **What counts:** scenario runs and stock-change restocks. Reset and Approve/Deny are never limited.
+- **When it's checked:** before the job lock is taken, and a run is only recorded once it actually starts. A refused or busy click never uses up the limit and never blocks other jobs.
+- **What the user sees:** a refused run returns **HTTP 429**, and the page shows "Demo limit reached (20 restocks per hour). Try again in about N minutes."
+- `0` turns the limit off. It's kept in memory, so a restart clears it, which is fine because a restart also wipes the demo database.
+
+### Free-tier behaviour and how it's handled
+| Behaviour | Effect | Handling |
+|---|---|---|
+| Sleeps after 15 min with no visitors; ~1 min to wake | A judge's first click would wait | Free uptime monitor (UptimeRobot / cron-job.org) calls `/health` every 10 min during judging. One always-on service uses ~720 h/month, inside the 750 h allowance. |
+| Disk wiped on restart, redeploy or sleep | Runs and the audit log disappear | The app reseeds itself on boot. The demo starts from Reset anyway. |
+| Shared state | Two visitors see the same runs | One job at a time; a second click gets "A job is already running". |
+
+### How to deploy (fresh setup)
+1. In Render, choose **New → Blueprint**, then pick the repo and branch.
+2. Paste the 7 secrets when asked.
+3. Click **Apply**. The first build takes 2–4 minutes.
+4. Point an uptime monitor at `https://<service>.onrender.com/health` every 10 minutes.
+
+### Tests
+**Offline: 81 tests pass** (3 new):
+- the rolling window, with a fake clock: the third run in an hour is refused with "about 40 minutes", and it's allowed again once the first run leaves the window
+- the API returns 429 over the limit, the refused run changes nothing, and Reset is still allowed
+- busy or refused clicks don't use up the limit
+
+**Clean build check:** a brand-new virtual environment installed only `requirements.txt` (as Render's build does). Started with Render's exact start command, it booted, seeded 3 items, logged "demo limit: 20 restocks per hour", and served `/health`, `/`, `/inventory` and `/static/app.js` with 200.
+
+**Live on https://restocking-agents.onrender.com (Nov 10, 2026)**, in the browser pane:
+| Check | Result |
+|---|---|
+| Health and API | `/health`, `/policy`, `/inventory` → 200 in about 1–2 s when awake. The policy shows the payee filled in from the Render secret. |
+| Page | Loads with the sidebar, Gemini connected, AG Grid from the CDN, no console errors |
+| A | 500 × $0.11 = $55 · approved by policy · payout SUCCESS (batch `6RJA36QA78ZM6`) · invoice MARKED_AS_PAID |
+| B | 120 kg at $0.84 = $100.80 · "Waiting for your approval" · Approve → "Paid $100.80 · Approved by you" |
+| C | $2.80 → shop $2.20 / $2.35, supplier holds $2.70, shop accepts in round 4 · blocked: "Unit price $2.70 is 35% above last paid $2.00 (limit 20%)" · no payment |
+| Reset | Seed restored (oil 60, pouches 250, plantain 200); runs and audit cleared; empty state shown |
+
+These live runs show that PayPal sandbox calls, Gemini calls and TLS (via `truststore` on Render's Linux image) all work from the hosted service, not just on the dev machine.
+
+### Notes
+- Scenario C took about 35 s on Render because some Gemini calls took around 10 s each (`gemini-3.5-flash-lite` response time, also seen locally on Nov 9). A, B and C each finish within about a minute, including the ~20 s sandbox payout.
+- Cold start wasn't timed live. Waking needs 15 minutes of no traffic, and the uptime monitor keeps the service awake. Render documents it as about a minute.
+
+### Known limits / later
+- After merging, switch the Render service's branch from `feature/render` to `main` (Render dashboard → service → Settings → Branch).
+- The uptime monitor is set up in the owner's own account (outside the repo).
+- README with setup steps, the Payouts caveat and the tools list is the next feature.
