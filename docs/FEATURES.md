@@ -9,7 +9,7 @@ One section per feature, added when the feature is finished and tested. Each sec
 | 3 | [LLM negotiation](#3-llm-negotiation) | `feature/llm-negotiation` | ✅ Done, merged Nov 7, 2026 |
 | 4 | [Web page, approvals and Scenarios B and C](#4-web-page-approvals-and-scenarios-b-and-c) | `feature/web-app` | ✅ Done, merged Nov 9, 2026 |
 | 5 | [Hosting on Render](#5-hosting-on-render) | `feature/render` | ✅ Done, merged Nov 11, 2026 |
-| 6 | [README and submission text](#6-readme-and-submission-text) | `feature/readme` | ✅ Done, tested Nov 11, 2026 |
+| 6 | [README and submission text](#6-readme-and-submission-text) | `feature/readme` | ✅ Done, merged Nov 11, 2026 |
 
 ---
 
