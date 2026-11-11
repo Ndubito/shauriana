@@ -199,8 +199,11 @@ def create_app_from_env() -> FastAPI:
     try:
         llm = GeminiLLM.from_env()
         llm_label = f"Gemini · {', '.join(llm.models)}"
-    except Exception:  # no key: scenarios still run on their fixed deals
-        llm, llm_label = None, "fixed deals (no LLM_API_KEY)"
+    except Exception as e:  # scenarios still run on their fixed deals; say why in the log and on the page
+        llm = None
+        missing_key = not os.getenv("LLM_API_KEY", "").strip()
+        llm_label = "fixed deals (no LLM_API_KEY)" if missing_key else "fixed deals (LLM setup failed: see server log)"
+        logging.getLogger("app").warning("LLM disabled, using fixed deals: %s: %s", type(e).__name__, e)
 
     c = db.connect(db_path)
     try:

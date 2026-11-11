@@ -257,3 +257,29 @@ def test_refused_or_busy_runs_do_not_use_up_the_limit(env):
         runner._lock.release()
     assert client.post("/scenarios/a").status_code == 202  # still allowed
     assert client.post("/scenarios/a").status_code == 429
+
+
+def test_llm_setup_failure_is_logged_and_labelled(monkeypatch, tmp_path, caplog):
+    """Without a key the page says so; any other setup error is logged, not hidden."""
+    import logging
+    from app.web import main
+    from app import llm as llm_mod
+    for k, v in {"PAYPAL_ENV": "sandbox", "SHOP_CLIENT_ID": "x", "SHOP_CLIENT_SECRET": "x",
+                 "SHOP_SANDBOX_EMAIL": SHOP, "SUPPLIER_CLIENT_ID": "x", "SUPPLIER_CLIENT_SECRET": "x",
+                 "SUPPLIER_SANDBOX_EMAIL": SUPPLIER, "DATABASE_URL": f"sqlite:///{tmp_path}/app.db"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)  # ignore the developer's .env
+
+    monkeypatch.setenv("LLM_API_KEY", "")
+    with caplog.at_level(logging.WARNING, logger="app"):
+        html = TestClient(main.create_app_from_env()).get("/").text
+    assert "fixed deals (no LLM_API_KEY)" in html and "LLM disabled" in caplog.text
+
+    monkeypatch.setenv("LLM_API_KEY", "set-but-broken")
+    def boom(cls):
+        raise RuntimeError("SDK import failed")
+    monkeypatch.setattr(llm_mod.GeminiLLM, "from_env", classmethod(boom))
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="app"):
+        html = TestClient(main.create_app_from_env()).get("/").text
+    assert "LLM setup failed: see server log" in html and "RuntimeError: SDK import failed" in caplog.text
