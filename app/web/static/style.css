@@ -27,8 +27,12 @@ h2 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; }
 /* Shell */
 .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 0; height: 100vh; }
-.brand-name { font-weight: 650; font-size: 1.05rem; }
-.brand-sub { color: var(--muted); font-size: 0.85rem; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 34px; height: 34px; flex: none; }
+.brand-mark rect { fill: var(--accent); }
+.brand-mark path { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; }
+.brand-name { font-weight: 700; font-size: 1.2rem; letter-spacing: -0.01em; line-height: 1.1; }
+.brand-sub { color: var(--muted); font-size: 0.82rem; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-link { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-weight: 500; }
 .nav-link svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -42,7 +46,6 @@ h2 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; }
 .demo-btn:hover { border-color: var(--accent); }
 .demo-btn.ghost { color: var(--muted); }
 .demo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.demo-foot { font-size: 0.72rem; color: var(--faint); margin-top: 4px; overflow-wrap: anywhere; }
 
 .content { padding: 32px 40px 48px; max-width: 980px; width: 100%; }
 .view { display: flex; flex-direction: column; gap: 20px; }
@@ -178,7 +181,7 @@ h2 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; }
   .sidebar { position: static; height: auto; flex-direction: column; gap: 12px; padding: 14px 16px; border-right: 0; border-bottom: 1px solid var(--line); }
   .nav { flex-direction: row; flex-wrap: wrap; }
   .demo { margin-top: 0; flex-direction: row; flex-wrap: wrap; }
-  .demo-title, .demo-foot { width: 100%; }
+  .demo-title { width: 100%; }
   .content { padding: 20px 16px 32px; }
   .tracker { padding: 18px 16px; }
   .t-headline { font-size: 1.25rem; }
