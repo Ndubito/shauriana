@@ -10,7 +10,7 @@ Built for the PayPal AI Hackathon by **Nathan Achar** ([@Ndubito](https://github
 
 | Paid automatically | Held for the owner | Blocked by a rule |
 |---|---|---|
-| ![A routine restock paid automatically after all seven checks passed](docs/images/paid.jpg) | ![A $105.60 order waiting for the owner, with Approve and Decline buttons and the agents' negotiation open](docs/images/approval.jpg) | ![A cooking oil order blocked because the price is 35% above the last price paid](docs/images/blocked.jpg) |
+| ![A routine restock paid automatically after all seven checks passed](docs/images/paid.jpg) | ![A $105.60 order waiting for the owner, with Approve and Decline buttons and the agents' negotiation open](docs/images/approval.png) | ![A cooking oil order blocked because the price is 35% above the last price paid](docs/images/blocked.jpg) |
 
 ---
 

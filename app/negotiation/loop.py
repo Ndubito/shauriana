@@ -2,6 +2,7 @@
 
 Round 1: the shop's request (built by code) and the supplier's quote.
 Rounds 2..max_rounds: the shop moves, then the supplier moves.
+The final round (when there are 3+ rounds) allows only accept or walk_away.
 An accept creates the deal from the other side's last valid offer. No accept by the
 end of the last round, a walk_away, a second invalid move by one side, or a model
 failure ends the run as no deal.
@@ -67,6 +68,11 @@ def negotiate(conn: sqlite3.Connection, *, run_id: str, item: str, request_qty: 
         other = SUPPLIER if side == SHOP else SHOP
         if rnd == 1:
             allowed = ("quote", "walk_away")
+        elif rnd == max_rounds and max_rounds >= 3:
+            # Final round: take the other side's last offer or leave. Without this, an agent
+            # could keep countering until time ran out, even when that offer fit its limits.
+            # (With max_rounds 2, the spec's "one quote and one counter" fallback still applies.)
+            allowed = ("accept", "walk_away")
         else:
             allowed = ("counter", "accept", "walk_away")
         feedback = None

@@ -118,11 +118,32 @@ def test_shop_cannot_accept_a_price_above_its_max(conn):
     assert "cannot accept" in offers[2]["reason"] and "above the shop's max" in offers[2]["reason"]
 
 
-def test_no_accept_by_round_4_is_no_deal(conn):
-    result, offers, *_ = run(conn, shop_moves=[mv("counter", price=0.10)] * 3,
-                             supplier_moves=[mv("quote", price=0.12)] + [mv("counter", price=0.12)] * 3)
-    assert result == NoDeal("no accept after 4 rounds")
-    assert max(o["round"] for o in offers) == 4
+def test_final_round_counter_is_rejected_and_sent_back(conn):
+    # Round 4 is final: a counter is not allowed. Countering twice is no deal.
+    result, offers, shop, _ = run(conn, shop_moves=[mv("counter", price=0.10)] * 4,
+                                  supplier_moves=[mv("quote", price=0.12)] + [mv("counter", price=0.12)] * 2)
+    assert isinstance(result, NoDeal) and "second invalid" in result.reason
+    rejected = [o for o in offers if not o["valid"]]
+    assert [o["round"] for o in rejected] == [4, 4]
+    assert "not allowed now (allowed: accept, walk_away)" in rejected[0]["reason"]
+    assert shop.views[-1].allowed_actions == ("accept", "walk_away")
+
+
+def test_final_round_accept_closes_at_the_other_sides_price(conn):
+    # Scenario C's pattern: the supplier holds at its floor, the shop takes it in round 4.
+    result, offers, shop, _ = run(
+        conn,
+        shop_moves=[mv("counter", price=0.10), mv("counter", price=0.11), mv("accept", why="Final round.")],
+        supplier_moves=[mv("quote", price=0.12), mv("counter", price=0.12), mv("counter", price=0.12)])
+    assert result == AgreedTerms(500, Decimal("0.12"), D, "shop", "Final round.")
+    assert offers[-1]["round"] == 4 and offers[-1]["action"] == "accept"
+    assert shop.views[-1].allowed_actions == ("accept", "walk_away")
+
+
+def test_final_round_walk_away_is_no_deal(conn):
+    result, *_ = run(conn, shop_moves=[mv("counter", price=0.10), mv("counter", price=0.11), mv("walk_away")],
+                     supplier_moves=[mv("quote", price=0.12), mv("counter", price=0.12), mv("counter", price=0.12)])
+    assert isinstance(result, NoDeal) and "shop walked away" in result.reason
 
 
 def test_max_rounds_2_is_one_quote_and_one_counter(conn):
