@@ -59,7 +59,11 @@ def render_turn(view: TurnView, me: str) -> str:
         f"Your move. Allowed actions: {', '.join(view.allowed_actions)}.",
     ]
     if view.round == view.max_rounds:
-        parts.append("This is the last round: if no one accepts, there is no deal.")
+        if "counter" in view.allowed_actions:
+            parts.append("This is the last round: if no one accepts, there is no deal.")
+        else:
+            parts.append("This is the final round: you can only accept the other side's latest offer "
+                         "or walk away. If its terms are within your limits, accepting is better than no deal.")
     if view.feedback:
         parts.append(f"Your previous move was rejected by the system: {view.feedback}. "
                      "Make a valid move. Another invalid move ends the negotiation with no deal.")

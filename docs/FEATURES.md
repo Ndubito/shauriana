@@ -661,3 +661,32 @@ The fresh-clone server showed "fixed deals (no LLM_API_KEY)" because the develop
 ### Known limits / later
 - The video link in the README and `SUBMISSION.md` is a placeholder until the video is on YouTube.
 - An uptime monitor on `/health` is still recommended so judges don't hit the cold start.
+
+---
+
+## Fixes on Nov 12, 2026
+
+### Final negotiation round: accept or walk away
+**Found:** while retaking README screenshots on the live site, Scenario C ended as **no deal**. In round 4 the shop countered at $2.50 instead of accepting the supplier's $2.70, even though $2.70 was within its limits. The prompt's "accept on the last round" rule depends on the model choosing to follow it. Runs also aren't identical across days, because the prompt includes today's date, so `temperature=0` can't make them repeat.
+
+**Fix, in code:** when a negotiation has 3 or more rounds, the final round allows only **accept** or **walk_away** (`app/negotiation/loop.py`). A counter there is rejected and sent back like any invalid move. The agent still chooses, but it can't haggle until time runs out. The turn prompt now says so. With `--max-rounds 2`, the spec's fallback of one quote and one counter is unchanged.
+
+**Tests:** 85 pass (3 new):
+- a final-round counter is rejected and the agent is told the allowed actions
+- a final-round accept closes at the other side's price (Scenario C's pattern)
+- a final-round walk-away is no deal
+
+**Confirmed locally against real Gemini before merging:**
+- **C, 4 runs (3 terminal, 1 web):** all blocked. Each time the shop accepted $2.70 in round 4 ("Since this is the final round and the price is within our acceptable limit, we accept…"), and the policy blocked it with the spec's reason.
+- **A:** paid $55 (payout SUCCESS).
+- **B:** held at $103.20. Both closed before the final round, so they're unaffected.
+
+### Logo and stale CSS
+**Found:** after the logo was added, the owner's browser showed it huge and unstyled. Render was serving the new page and the new CSS, but `style.css` had no cache instructions, so the browser kept its old copy.
+
+**Fix:**
+- The logo SVG carries its own size (34 px) and colours, so it renders correctly with a stale or missing stylesheet. Checked by disabling the stylesheet in the browser: it stays 34×34 and blue.
+- `style.css` and `app.js` are linked as `?v=<content hash>`, so any change gives browsers a new URL.
+- `.gitignore` now also covers SQLite's `-wal`, `-shm` and `-journal` files. Two of them slipped onto a branch commit; the merge to `main` was squashed so they never entered `main`'s history.
+
+**README screenshots** were retaken with the new header: paid and held from the live site, blocked from the local server with the final-round fix.
