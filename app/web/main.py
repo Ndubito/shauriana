@@ -4,6 +4,7 @@ Start:  uvicorn app.web.main:create_app_from_env --factory
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -21,6 +22,15 @@ from app.runner import Busy, RateLimited, RateLimiter, Runner
 HERE = Path(__file__).resolve().parent
 
 
+def static_fingerprint() -> str:
+    """Short hash of the CSS and JS. The page links them as ?v=<hash>, so any change to
+    either file gives browsers a new URL and they can't keep using a stale cached copy."""
+    h = hashlib.sha256()
+    for name in ("style.css", "app.js"):
+        h.update((HERE / "static" / name).read_bytes())
+    return h.hexdigest()[:10]
+
+
 class StockUpdate(BaseModel):
     stock: int = Field(ge=0)
 
@@ -33,6 +43,7 @@ def create_app(runner: Runner, *, llm_label: str) -> FastAPI:
     app = FastAPI(title="Restocking Agents with Spending Guardrails")
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
+    asset_version = static_fingerprint()
     rules = runner.rules
 
     def conn():
@@ -50,6 +61,7 @@ def create_app(runner: Runner, *, llm_label: str) -> FastAPI:
         scenarios = [{"key": k, "title": v.get("title", k)} for k, v in runner.seed_data["scenarios"].items()]
         return templates.TemplateResponse(request, "index.html", {
             "policy": policy_json(), "scenarios": scenarios, "llm_label": llm_label,
+            "asset_version": asset_version,
         })
 
     @app.get("/health")
