@@ -7,8 +7,11 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# Local data
+# Local data (SQLite and its WAL/SHM companion files)
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Local Claude Code settings (launch config, permissions)
 .claude/

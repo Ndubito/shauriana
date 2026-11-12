@@ -283,3 +283,18 @@ def test_llm_setup_failure_is_logged_and_labelled(monkeypatch, tmp_path, caplog)
     with caplog.at_level(logging.WARNING, logger="app"):
         html = TestClient(main.create_app_from_env()).get("/").text
     assert "LLM setup failed: see server log" in html and "RuntimeError: SDK import failed" in caplog.text
+
+
+def test_assets_are_fingerprinted_and_logo_has_its_own_size(env):
+    """Browsers must fetch new CSS/JS after a change, and the logo must not depend on the CSS."""
+    import re
+    from app.web.main import static_fingerprint
+    client, *_ = env
+    html = client.get("/").text
+    v = static_fingerprint()
+    assert re.fullmatch(r"[0-9a-f]{10}", v)
+    assert f'/static/style.css?v={v}' in html and f'/static/app.js?v={v}' in html
+    assert client.get(f"/static/style.css?v={v}").status_code == 200
+    logo = re.search(r'<svg class="brand-mark"[^>]*>', html).group(0)
+    assert 'width="34"' in logo and 'height="34"' in logo
+    assert 'fill="#1f4fd8"' in html and 'stroke="#ffffff"' in html
